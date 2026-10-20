@@ -9,7 +9,7 @@
 
 ## Publish
 
-1. Update `## Version` in the addon TOC and commit all addon changes.
+1. Update `## Version` in the addon TOC and `RELEASE_NOTES.md` (heading `# v<version>`) with user-facing English/Korean changes, then commit all addon changes.
 2. Create a GitHub release for that commit with tag `v<TOC version>` (for example `v1.0.0`).
 3. Click **Publish release**. The `Release to CurseForge` workflow validates the package,
    creates the installable ZIP and uploads to the project ID in `release.json`.
@@ -54,3 +54,7 @@ API reference: https://support.curseforge.com/en/support/solutions/articles/9000
 - ZIP 생성만 시험하려면 Actions에서 수동 실행하고 upload를 끈 상태로 둡니다.
 - 성공 시 파일 ID가 포함된 업로드 영수증을 Actions 아티팩트에서 확인할 수 있습니다.
 - 새 프로젝트는 CurseForge 검토·승인 후 공개될 수 있습니다.
+
+CurseForge changelogs always come from `RELEASE_NOTES.md`, not the GitHub release body. The notes version must match the TOC version.
+
+CurseForge 변경 내역은 GitHub 본문 대신 저장소 `RELEASE_NOTES.md`를 사용합니다. 문서 버전과 TOC 버전이 다르면 배포를 중단합니다.

@@ -18,6 +18,7 @@ class PackageTests(unittest.TestCase):
         self.toc = self.root / (self.addon + '.toc')
         self.toc.write_text('## Interface: 16001\n## Version: 1.2.3\n## X-Curse-Project-ID: 42\nmain.lua\n', encoding='utf-8')
         (self.root / 'main.lua').write_text('print("test")\n', encoding='utf-8')
+        (self.root / 'RELEASE_NOTES.md').write_text('# v1.2.3\n\n- User-visible fix.\n', encoding='utf-8')
         (self.root / 'release.json').write_text(json.dumps({'addon': self.addon, 'project_id': 42, 'interface': '16001', 'game_version': '1.60.1'}), encoding='utf-8')
 
     def test_deterministic_zip_and_exclusions(self):
@@ -47,6 +48,11 @@ class PackageTests(unittest.TestCase):
     def test_wrong_project_rejected(self):
         self.toc.write_text(self.toc.read_text().replace('ID: 42', 'ID: 43'), encoding='utf-8')
         with self.assertRaisesRegex(ValueError, 'project IDs differ'):
+            release.build(self.root, self.root / 'dist')
+
+    def test_stale_release_notes_rejected(self):
+        (self.root / 'RELEASE_NOTES.md').write_text('# v1.2.2\n', encoding='utf-8')
+        with self.assertRaisesRegex(ValueError, 'matching the TOC version'):
             release.build(self.root, self.root / 'dist')
 
 if __name__ == '__main__':
