@@ -194,11 +194,3 @@ If you find this addon useful, you can support its development.
 [Buy Me a Coffee ☕](https://buymeacoffee.com/qqhrqqhr2)
 
 <a href="https://buymeacoffee.com/qqhrqqhr2"><img src="docs/images/bmc_qr.png" alt="Buy Me a Coffee 후원 QR 코드" width="220" /></a>
-
-## Automated releases / 자동 릴리즈
-
-GitHub 릴리즈를 게시하면 CurseForge에 자동 업로드합니다. 최초 설정에 Actions Secret `CF_API_TOKEN`이 필요합니다.
-
-Publishing a GitHub release triggers the CurseForge upload workflow. Set the repository Actions secret `CF_API_TOKEN` first.
-
-[Setup and release instructions / 설정 및 배포 방법](docs/RELEASE.md)
