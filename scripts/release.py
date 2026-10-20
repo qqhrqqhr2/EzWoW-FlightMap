@@ -77,8 +77,10 @@ def build(root, output):
     with zipfile.ZipFile(archive) as target:
         if target.testzip() is not None or addon + '/' + addon + '.toc' not in target.namelist():
             raise ValueError('ZIP verification failed')
-    changelog_path = root / 'CHANGELOG.md'
-    changelog = changelog_path.read_text(encoding='utf-8-sig') if changelog_path.exists() else 'Release from repository sources.'
+    changelog_path = root / 'RELEASE_NOTES.md'
+    changelog = changelog_path.read_text(encoding='utf-8-sig')
+    if not re.search(r'^#\s+v?' + re.escape(version) + r'\s*$', changelog, re.M):
+        raise ValueError('RELEASE_NOTES.md must have a heading matching the TOC version: # v' + version)
     metadata = {'displayName': 'v' + version + '-forever', 'changelog': changelog, 'changelogType': 'markdown',
                 'gameVersionNames': [config['game_version']], 'releaseType': 'release'}
     metadata_path = archive.with_suffix('.metadata.json')
@@ -123,7 +125,7 @@ def main():
             raise ValueError('GitHub release tag must match the TOC version: ' + version)
         if release.get('draft'):
             raise ValueError('Draft releases cannot be uploaded')
-        metadata['changelog'] = release.get('body') or metadata['changelog']
+        # Public release notes come from the versioned repository file, never CI instructions.
         metadata['releaseType'] = 'beta' if release.get('prerelease') else 'release'
         archive.with_suffix('.metadata.json').write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding='utf-8')
     print(json.dumps({'zip': str(archive), 'files': count, 'project_id': config['project_id'], 'sha256': digest}, ensure_ascii=False))
