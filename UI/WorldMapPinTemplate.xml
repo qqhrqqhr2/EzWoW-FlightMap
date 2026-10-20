@@ -1,0 +1,5 @@
+<Ui xmlns="http://www.blizzard.com/wow/ui/">
+    <Frame name="EzWoWFlightMapPinTemplate" virtual="true" mixin="EzWoWFlightMapPinMixin" enableMouse="true">
+        <Size x="14" y="14"/>
+    </Frame>
+</Ui>

@@ -1,0 +1,37 @@
+## Interface: 16001
+## Title: EzWoW - Flight Map
+## Title-enUS: EzWoW - Flight Map
+## Title-koKR: EzWoW - Flight Map
+## Title-deDE: EzWoW - Flight Map
+## Title-frFR: EzWoW - Flight Map
+## Title-esES: EzWoW - Flight Map
+## Title-esMX: EzWoW - Flight Map
+## Title-ruRU: EzWoW - Flight Map
+## Title-zhCN: EzWoW - Flight Map
+## Title-zhTW: EzWoW - Flight Map
+## Notes: Dedicated flight master map. Shows gryphon, wyvern, bat and hippogryph flight points with name, cost and flight time in a clean, separate window without other addons' map icons.
+## Notes-koKR: 비행 조련사(그리폰·와이번·박쥐·히포그리프)와 대화하면 다른 애드온 아이콘 없이 비행 지점과 목적지 이름·요금·소요 시간만 보이는 깔끔한 전용 지도 창을 띄웁니다.
+## Notes-deDE: Zeigt Flugpunkte mit Zielname, Kosten und Flugzeit in einem übersichtlichen, separaten Fenster ohne andere Karten-Icons.
+## Notes-frFR: Affiche les points de vol avec nom, coût et temps de vol dans une fenêtre dédiée et épurée.
+## Notes-esES: Muestra los puntos de vuelo con nombre, coste y tiempo de vuelo en una ventana limpia e independiente.
+## Notes-esMX: Muestra los puntos de vuelo con nombre, costo y tiempo de vuelo en una ventana limpia e independiente.
+## Notes-ruRU: Показывает точки полётов с названием, стоимостью и временем полёта в отдельном чистом окне без значков других аддонов.
+## Notes-zhCN: 与飞行管理员对话时在独立干净的窗口中显示飞行点、目的地名称、费用与飞行时间。
+## Notes-zhTW: 與飛行管理員對話時在獨立乾淨的視窗中顯示飛行點、目的地名稱、費用與飛行時間。
+## Author: qqhrqqhr2
+## Version: 0.6.2
+## IconTexture: Interface\AddOns\EzWoW-FlightMap\Media\Icon
+## SavedVariables: EzWoW_FlightMapDB
+## X-Curse-Project-ID: 1736991
+
+Core\Init.lua
+Core\UIKit.lua
+Core\Locales.lua
+Core\WorldMapDock.lua
+Data\RouteDistances.lua
+Modules\FlightRouteEngine.lua
+UI\FlightBar.lua
+UI\FlightMapWindow.lua
+UI\OptionsWindow.lua
+UI\WorldMapPins.lua
+UI\WorldMapPinTemplate.xml
