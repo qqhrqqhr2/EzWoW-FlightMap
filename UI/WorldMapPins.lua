@@ -87,6 +87,13 @@ function WorldMapPinProvider.normalizePointCoordinates(pos)
     if WorldMapPinProvider.formatCountWithCommas(coordX) and WorldMapPinProvider.formatCountWithCommas(coordY) then return coordX, coordY end
 end
 
+-- Boat, zeppelin and tram docks come back from the taxi API with continent atlases.
+-- They are not flight masters, so they are left to Map Finder's transport option.
+function WorldMapPinProvider.isTransportNode(n)
+    local atlas = n.atlasName or n.textureKit
+    return type(atlas) == "string" and atlas:find("Continent", 1, true) ~= nil
+end
+
 function WorldMapPinProvider.collectMapFlightNodes(mapID)
     if not (C_TaxiMap and C_TaxiMap.GetTaxiNodesForMap) then return {} end
     local isCallOk, nodeList2 = pcall(C_TaxiMap.GetTaxiNodesForMap, mapID)
@@ -107,7 +114,8 @@ function WorldMapPinProvider.collectMatchingEntries(mapID)
     local function appendEntry(nodeList2, left, right, top, bottom)
         for _, n in ipairs(nodeList2) do
             if type(n) == "table" and type(n.name) == "string"
-                and not n.name:lower():match("^zzold") then
+                and not n.name:lower():match("^zzold")
+                and not WorldMapPinProvider.isTransportNode(n) then
                 local coordX, coordY = WorldMapPinProvider.normalizePointCoordinates(n.position)
                 if coordX and coordX >= 0 and coordX <= 1 and coordY >= 0 and coordY <= 1 then
                     coordX, coordY = left + coordX * (right - left), top + coordY * (bottom - top)
