@@ -1,0 +1,67 @@
+name: Release to CurseForge
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      upload:
+        description: Upload the current TOC version to CurseForge (false builds only)
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: curseforge-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out the release tag
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12'
+      - name: Test packaging safeguards
+        run: python -m unittest discover -s scripts -p test_release.py
+      - name: Build and validate package
+        env:
+          IS_RELEASE: ${{ github.event_name == 'release' }}
+        run: |
+          if [ "$IS_RELEASE" = "true" ]; then
+            python scripts/release.py --github-release
+          else
+            python scripts/release.py
+          fi
+      - name: Upload to CurseForge
+        if: github.event_name == 'release' || inputs.upload
+        env:
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          IS_RELEASE: ${{ github.event_name == 'release' }}
+        run: |
+          if [ -z "$CF_API_TOKEN" ]; then
+            echo "::error::Add the CurseForge upload token as the repository Actions secret CF_API_TOKEN."
+            exit 1
+          fi
+          if [ "$IS_RELEASE" = "true" ]; then
+            python scripts/release.py --github-release --upload
+          else
+            python scripts/release.py --upload
+          fi
+      - name: Save package and upload receipt
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: curseforge-${{ github.run_id }}-${{ github.run_attempt }}
+          path: dist/*
+          if-no-files-found: ignore
+          retention-days: 30
+
