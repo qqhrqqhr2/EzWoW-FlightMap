@@ -192,3 +192,5 @@ If you find this addon useful, you can support its development.
 애드온이 도움이 되셨다면 개발 후원으로 응원해 주세요.
 
 [Buy Me a Coffee ☕](https://buymeacoffee.com/qqhrqqhr2)
+
+<a href="https://buymeacoffee.com/qqhrqqhr2"><img src="docs/images/bmc_qr.png" alt="Buy Me a Coffee 후원 QR 코드" width="220" /></a>
