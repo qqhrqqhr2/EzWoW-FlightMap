@@ -1,5 +1,10 @@
 # EzWoW - Flight Map (`EzWoW-FlightMap`)
 
+## CurseForge
+
+- **Project ID / 프로젝트 ID:** `1736991`
+- **Project page / 프로젝트 페이지:** [EzWoW-FlightMap](https://www.curseforge.com/wow/addons/easyflightmap)
+
 **[한국어](#한국어) · [English](#english)**
 
 WoW Forever (`Interface: 16001`) · `v0.6.2` · `/ezfl`
