@@ -61,7 +61,7 @@ WoW Forever (`Interface: 16001`) · `v0.6.2` · `/ezfl`
 
 | 번호 | 항목 | 설명 | 기본값 |
 |---|---|---|---|
-| ① | 언어 (Language) | 자동 또는 8개 언어 버튼 | 자동 |
+| ① | 언어 (Language) | 상자를 누르고 목록에서 자동 또는 8개 언어 중 고름 | 자동 |
 | ② | 전용 비행 지도 사용 | 끄면 게임 기본 비행 지도를 씁니다. | 켬 |
 | ② | 대화창 없이 바로 지도 열기 | Shift를 누른 채 말을 걸면 대화창이 나옵니다. | 켬 |
 | ② | 비행 전 확인 창 표시 | 출발 전에 요금·목적지를 한 번 더 확인 | 끔 |
@@ -148,7 +148,7 @@ When you talk to a flight master (gryphon, wyvern, bat or hippogryph), Flight Ma
 
 | No. | Option | Description | Default |
 |---|---|---|---|
-| ① | Language | Auto or one of 8 language buttons | Auto |
+| ① | Language | Click the box and pick Auto or one of 8 languages from the list | Auto |
 | ② | Use the EzWoW - Flight Map window | Off = use the default flight map | On |
 | ② | Skip the dialog and open the map directly | Hold Shift while talking to see the dialog | On |
 | ② | Confirm before flying | Confirm fare and destination before take-off | Off |

@@ -212,10 +212,20 @@ function SettingsDialog.buildSlider(parent, width)
     return stateFlag
 end
 
+-- Full language names for the language list (the grid used short codes like EN / DE)
+local LANGUAGE_NAMES = {
+    koKR = "한국어", enUS = "English", deDE = "Deutsch", frFR = "Français",
+    esES = "Español", ruRU = "Русский", zhCN = "简体中文", zhTW = "繁體中文",
+}
+function SettingsDialog.languageName(key)
+    if key == "auto" then return L.LANG_AUTO end
+    return LANGUAGE_NAMES[key] or key
+end
+
 function SettingsDialog.assembleSettings(parent, x, y, width)
     local controls = {}
     local headerPool = {}
-    local langButtons = {}
+    local langBox
     local langLabelFS
     for _, optionEntry in ipairs(SETTINGS) do
         if optionEntry.kind == "header" then
@@ -231,39 +241,29 @@ function SettingsDialog.assembleSettings(parent, x, y, width)
             line:SetPoint("TOPLEFT", parent, "TOPLEFT", x, y - 20)
             y = y - 26
         elseif optionEntry.kind == "lang" then
+            -- label on the left, combo box on the right: click the box, then pick a language
             langLabelFS = parent:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-            langLabelFS:SetPoint("TOPLEFT", parent, "TOPLEFT", x + 2, y - 2)
+            langLabelFS:SetPoint("TOPLEFT", parent, "TOPLEFT", x + 2, y - 4)
             langLabelFS:SetText(L[optionEntry.label])
             langLabelFS.labelKey = optionEntry.label
-            y = y - 20
-            local cols = 5
-            local btnW = floor((width - 4 - (cols - 1) * 4) / cols)
-            local btnH = 20
+            langBox = createFlightMapButton(parent, 200, 22, false, nil)
+            langBox:SetPoint("TOPRIGHT", parent, "TOPLEFT", x + width, y)
+            local langItems = {}
             for entryIndex, item in ipairs(LANG_OPTIONS) do
-                local columnIndex = (entryIndex - 1) % cols
-                local rowWidget = floor((entryIndex - 1) / cols)
-                local buttonWidget = CreateFrame("Button", nil, parent, BackdropTemplateMixin and "BackdropTemplate" or nil)
-                buttonWidget:SetSize(btnW, btnH)
-                buttonWidget:SetPoint("TOPLEFT", parent, "TOPLEFT", x + 2 + columnIndex * (btnW + 4), y - rowWidget * (btnH + 3))
-                if buttonWidget.SetBackdrop then
-                    buttonWidget:SetBackdrop(LABEL_BACKDROP)
-                    buttonWidget:SetBackdropColor(STYLE.bgSecondary[1], STYLE.bgSecondary[2], STYLE.bgSecondary[3], 0.95)
-                    buttonWidget:SetBackdropBorderColor(STYLE.border[1], STYLE.border[2], STYLE.border[3], 1)
-                end
-                buttonWidget.txt = buttonWidget:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-                buttonWidget.txt:SetPoint("CENTER")
-                buttonWidget.txt:SetText(item.key == "auto" and L.LANG_AUTO or item.label)
-                ns.UIKit:FitFontString(buttonWidget.txt, btnW - 8, 1)
-                buttonWidget.langKey = item.key
-                buttonWidget.langLabel = item.label
-                buttonWidget:SetScript("OnClick", function(self)
-                    if not ns.DB then return end
-                    ns.DB.lang = self.langKey
-                    SettingsDialog.syncAllLocaleUI()
-                end)
-                langButtons[#langButtons + 1] = buttonWidget
+                local key = item.key
+                langItems[entryIndex] = { value = key, text = function() return SettingsDialog.languageName(key) end }
             end
-            y = y - (2 * (btnH + 3) + 6)
+            ns.LanguageDropdown.Attach(langBox, {
+                items = langItems,
+                colors = { bg = STYLE.bgPrimary, border = STYLE.border, accent = STYLE.accent, text = STYLE.textBody },
+                get = function() return (ns.DB and ns.DB.lang) or "auto" end,
+                set = function(key)
+                    if not ns.DB then return end
+                    ns.DB.lang = key
+                    SettingsDialog.syncAllLocaleUI()
+                end,
+            })
+            y = y - 30
         elseif optionEntry.kind == "check" then
             local checkWidget = CreateFrame("CheckButton", nil, parent, "UICheckButtonTemplate")
             checkWidget:SetSize(24, 24)
@@ -371,26 +371,12 @@ function SettingsDialog.assembleSettings(parent, x, y, width)
         end
         if langLabelFS then
             langLabelFS:SetText(L[langLabelFS.labelKey])
+            ns.UIKit:FitFontString(langLabelFS, width - 212, 1)
         end
-        local lang = (ns.DB and ns.DB.lang) or "auto"
-        for _, buttonWidget in ipairs(langButtons) do
-            buttonWidget.txt:SetText(buttonWidget.langKey == "auto" and L.LANG_AUTO or buttonWidget.langLabel)
-            ns.UIKit:FitFontString(buttonWidget.txt, buttonWidget:GetWidth() - 8, 1)
-            local active = (buttonWidget.langKey == lang)
-            if buttonWidget.SetBackdrop then
-                if active then
-                    buttonWidget:SetBackdropColor(STYLE.accent[1] * 0.35, STYLE.accent[2] * 0.35, STYLE.accent[3] * 0.35, 0.95)
-                    buttonWidget:SetBackdropBorderColor(STYLE.accent[1], STYLE.accent[2], STYLE.accent[3], 1)
-                else
-                    buttonWidget:SetBackdropColor(STYLE.bgSecondary[1], STYLE.bgSecondary[2], STYLE.bgSecondary[3], 0.95)
-                    buttonWidget:SetBackdropBorderColor(STYLE.border[1], STYLE.border[2], STYLE.border[3], 1)
-                end
-            end
-            if active then
-                buttonWidget.txt:SetTextColor(STYLE.accent[1], STYLE.accent[2], STYLE.accent[3])
-            else
-                buttonWidget.txt:SetTextColor(STYLE.textBody[1], STYLE.textBody[2], STYLE.textBody[3])
-            end
+        if langBox then
+            langBox.label:SetText(SettingsDialog.languageName((ns.DB and ns.DB.lang) or "auto") .. " ▼")
+            ns.UIKit:FitFontString(langBox.label, 192, 1)
+            ns.LanguageDropdown.Refresh(langBox)
         end
         for _, themeColor in ipairs(controls) do
             if themeColor.isFactionCheck then

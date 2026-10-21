@@ -33,6 +33,7 @@ Data\RouteDistances.lua
 Modules\FlightRouteEngine.lua
 UI\FlightBar.lua
 UI\FlightMapWindow.lua
+UI\LanguageDropdown.lua
 UI\OptionsWindow.lua
 UI\WorldMapPins.lua
 UI\WorldMapPinTemplate.xml
