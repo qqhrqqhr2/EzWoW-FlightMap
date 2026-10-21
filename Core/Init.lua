@@ -252,7 +252,11 @@ function ns.CreateStyledButton(parent, w, h, isAccent, onClick)
         self:SetBackdropBorderColor(STYLE.accent[1], STYLE.accent[2], STYLE.accent[3], 1)
     end)
     buttonWidget:SetScript("OnLeave", applyNormalButtonLook)
-    function buttonWidget:SetText(txt) formatLocalizedLabel:SetText(txt or "") end
+    -- Long translations (German, Russian, ...) shrink to fit the button
+    function buttonWidget:SetText(txt)
+        formatLocalizedLabel:SetText(txt or "")
+        ns.UIKit:FitFontString(formatLocalizedLabel, buttonWidget:GetWidth() - 8, 1)
+    end
     function buttonWidget:GetText() return formatLocalizedLabel:GetText() end
     buttonWidget:SetScript("OnMouseDown", function() formatLocalizedLabel:SetPoint("CENTER", 1, -1) end)
     buttonWidget:SetScript("OnMouseUp", function() formatLocalizedLabel:SetPoint("CENTER", 0, 0) end)

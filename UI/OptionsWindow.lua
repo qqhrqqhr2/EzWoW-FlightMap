@@ -253,6 +253,7 @@ function SettingsDialog.assembleSettings(parent, x, y, width)
                 buttonWidget.txt = buttonWidget:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
                 buttonWidget.txt:SetPoint("CENTER")
                 buttonWidget.txt:SetText(item.key == "auto" and L.LANG_AUTO or item.label)
+                ns.UIKit:FitFontString(buttonWidget.txt, btnW - 8, 1)
                 buttonWidget.langKey = item.key
                 buttonWidget.langLabel = item.label
                 buttonWidget:SetScript("OnClick", function(self)
@@ -272,8 +273,11 @@ function SettingsDialog.assembleSettings(parent, x, y, width)
             extractSafeTooltipText:SetWidth(width - 30)
             extractSafeTooltipText:SetJustifyH("LEFT")
             extractSafeTooltipText:SetText(L[optionEntry.label])
+            -- rows are 26px apart, so long translations shrink to one line
+            ns.UIKit:FitFontString(extractSafeTooltipText, width - 30, 1)
             checkWidget.labelFS = extractSafeTooltipText
             checkWidget.labelKey = optionEntry.label
+            checkWidget.labelWidth = width - 30
             y = y - 26
             if optionEntry.sub then
                 local sub = checkWidget:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
@@ -281,6 +285,7 @@ function SettingsDialog.assembleSettings(parent, x, y, width)
                 sub:SetWidth(width - 30)
                 sub:SetJustifyH("LEFT")
                 sub:SetText(L[optionEntry.sub])
+                ns.UIKit:FitFontString(sub, width - 30, 1)
                 checkWidget.subFS = sub
                 checkWidget.subKey = optionEntry.sub
                 y = y - 12
@@ -320,6 +325,7 @@ function SettingsDialog.assembleSettings(parent, x, y, width)
                     ftVal:SetPoint("LEFT", fcb, "RIGHT", 2, 0)
                     ftVal:SetTextColor(fdVal.color[1], fdVal.color[2], fdVal.color[3])
                     fcb.labelFS = ftVal
+                    fcb.labelWidth = 116 - 24 - 4
                     fcb.factionID = fdVal.id
                     fcb.factionKey = fdVal.key
                     fcb.isFactionCheck = true
@@ -338,6 +344,7 @@ function SettingsDialog.assembleSettings(parent, x, y, width)
             local formatLocalizedLabel = parent:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
             formatLocalizedLabel:SetPoint("TOPLEFT", parent, "TOPLEFT", x + 2, y - 4)
             formatLocalizedLabel:SetText(L[optionEntry.label])
+            ns.UIKit:FitFontString(formatLocalizedLabel, width - 50, 1)   -- leaves room for the value on the right
             local value = parent:CreateFontString(nil, "OVERLAY", "GameFontNormal")
             value:SetPoint("TOPRIGHT", parent, "TOPLEFT", x + width - 2, y - 4)
             value:SetTextColor(STYLE.accent[1], STYLE.accent[2], STYLE.accent[3])
@@ -347,6 +354,7 @@ function SettingsDialog.assembleSettings(parent, x, y, width)
             stateFlag:SetValueStep(optionEntry.step)
             stateFlag.optKey, stateFlag.valueText, stateFlag.fmt, stateFlag.step, stateFlag.isSlider = optionEntry.key, value, optionEntry.fmt, optionEntry.step, true
             stateFlag.labelFS, stateFlag.labelKey = formatLocalizedLabel, optionEntry.label
+            stateFlag.labelWidth = width - 50
             stateFlag:SetScript("OnValueChanged", function(self, v)
                 v = floor(v / self.step + 0.5) * self.step
                 self.valueText:SetText(self.fmt:format(v))
@@ -367,6 +375,7 @@ function SettingsDialog.assembleSettings(parent, x, y, width)
         local lang = (ns.DB and ns.DB.lang) or "auto"
         for _, buttonWidget in ipairs(langButtons) do
             buttonWidget.txt:SetText(buttonWidget.langKey == "auto" and L.LANG_AUTO or buttonWidget.langLabel)
+            ns.UIKit:FitFontString(buttonWidget.txt, buttonWidget:GetWidth() - 8, 1)
             local active = (buttonWidget.langKey == lang)
             if buttonWidget.SetBackdrop then
                 if active then
@@ -386,12 +395,21 @@ function SettingsDialog.assembleSettings(parent, x, y, width)
         for _, themeColor in ipairs(controls) do
             if themeColor.isFactionCheck then
                 local wmVal = L.WM or {}
-                if themeColor.labelFS and themeColor.factionKey then themeColor.labelFS:SetText(wmVal[themeColor.factionKey] or themeColor.factionKey) end
+                if themeColor.labelFS and themeColor.factionKey then
+                    themeColor.labelFS:SetText(wmVal[themeColor.factionKey] or themeColor.factionKey)
+                    ns.UIKit:FitFontString(themeColor.labelFS, themeColor.labelWidth, 1)
+                end
                 local fOpts = ns.GetWorldMapFactionSettings and ns.GetWorldMapFactionSettings()
                 themeColor:SetChecked(fOpts and fOpts[themeColor.factionID] == true or false)
             else
-                if themeColor.labelFS and themeColor.labelKey then themeColor.labelFS:SetText(L[themeColor.labelKey]) end
-                if themeColor.subFS and themeColor.subKey then themeColor.subFS:SetText(L[themeColor.subKey]) end
+                if themeColor.labelFS and themeColor.labelKey then
+                    themeColor.labelFS:SetText(L[themeColor.labelKey])
+                    ns.UIKit:FitFontString(themeColor.labelFS, themeColor.labelWidth, 1)
+                end
+                if themeColor.subFS and themeColor.subKey then
+                    themeColor.subFS:SetText(L[themeColor.subKey])
+                    ns.UIKit:FitFontString(themeColor.subFS, themeColor.labelWidth, 1)
+                end
                 local v = SettingsDialog.resolveOpt(themeColor.optKey)
                 if themeColor.isSlider then
                     themeColor.updating = true
@@ -501,11 +519,11 @@ switchSettingsPopup = function()
             end
         end)
         popupDefaultBtn:SetPoint("TOPLEFT", settingsPopoverFrame, "TOPLEFT", 20, bottom - 10)
-        popupDefaultBtn.label:SetText(resolveResetBtnLabel())
+        popupDefaultBtn:SetText(resolveResetBtnLabel())
 
         local donate = createFlightMapButton(settingsPopoverFrame, 184, 28, true, SettingsDialog.openDonateDialog)
         donate:SetPoint("TOPRIGHT", settingsPopoverFrame, "TOPRIGHT", -20, bottom - 10)
-        donate.label:SetText(L.BTN_DONATE)
+        donate:SetText(L.BTN_DONATE)
         settingsPopoverFrame.donateBtn = donate
 
         local footerRegion = settingsPopoverFrame:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
@@ -515,8 +533,8 @@ switchSettingsPopup = function()
 
         allSettingRefreshers[#allSettingRefreshers + 1] = function()
             if settingsPopoverFrame.titleFS then settingsPopoverFrame.titleFS:SetText(L.SETTINGS) end
-            if popupDefaultBtn then popupDefaultBtn.label:SetText(resolveResetBtnLabel()) end
-            if settingsPopoverFrame.donateBtn then settingsPopoverFrame.donateBtn.label:SetText(L.BTN_DONATE) end
+            if popupDefaultBtn then popupDefaultBtn:SetText(resolveResetBtnLabel()) end
+            if settingsPopoverFrame.donateBtn then settingsPopoverFrame.donateBtn:SetText(L.BTN_DONATE) end
         end
 
         settingsPopoverFrame:SetSize(420, -bottom + 66)
@@ -534,7 +552,7 @@ switchSettingsPopup = function()
         popupRefresh()
         if popupDefaultBtn then
             local hasKo = (L.SETTINGS == "설정")
-            popupDefaultBtn.label:SetText(currentState.open and L.BTN_DEFAULT or (hasKo and "창·버튼 위치 초기화" or "Reset Window Position"))
+            popupDefaultBtn:SetText(currentState.open and L.BTN_DEFAULT or (hasKo and "창·버튼 위치 초기화" or "Reset Window Position"))
         end
         settingsPopoverFrame:Show()
         settingsPopoverFrame:Raise()

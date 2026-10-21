@@ -449,7 +449,11 @@ local function createFlightMapButton(parent, boxWidth, headerBar, isAccent, onCl
         formatLocalizedLabel:SetTextColor(STYLE.textBody[1], STYLE.textBody[2], STYLE.textBody[3])
     end
     buttonWidget.label = formatLocalizedLabel
-    function buttonWidget:SetText(txt) formatLocalizedLabel:SetText(txt or "") end
+    -- Long translations (German, Russian, ...) shrink to fit the button
+    function buttonWidget:SetText(txt)
+        formatLocalizedLabel:SetText(txt or "")
+        ns.UIKit:FitFontString(formatLocalizedLabel, buttonWidget:GetWidth() - 8, 1)
+    end
     function buttonWidget:GetText() return formatLocalizedLabel:GetText() end
     buttonWidget:SetScript("OnEnter", function()
         if buttonWidget.SetBackdropColor then
@@ -941,6 +945,7 @@ paintList = function()
     end
     for key, tabWidget in pairs(destinationListPanel.tabs) do
         tabWidget.text:SetText(L["SORT_" .. key:upper()])
+        ns.UIKit:FitFontString(tabWidget.text, tabWidget:GetWidth() - 8, 1)
         local active = (key == ns.DB.listSort)
         if tabWidget.SetBackdropColor then
             if active then
@@ -1065,6 +1070,7 @@ function FlightMapWindow.buildList()
         tabWidget.text = tabWidget:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
         tabWidget.text:SetPoint("CENTER")
         tabWidget.text:SetText(L["SORT_" .. key:upper()])
+        ns.UIKit:FitFontString(tabWidget.text, tabW - 10, 1)
         tabWidget.key = key
         tabWidget:SetScript("OnEnter", function(self)
             if self.SetBackdropBorderColor then

@@ -230,7 +230,11 @@ function WorldMapPinProvider.constructSmallBtn(parent, width, height, text, onCl
     labelRegion:SetTextColor(STYLE.textBody[1], STYLE.textBody[2], STYLE.textBody[3])
     labelRegion:SetText(text or "")
     buttonWidget.label = labelRegion
-    function buttonWidget:SetText(txt) labelRegion:SetText(txt or "") end
+    -- Long translations (German, Russian, ...) shrink to fit the button
+    function buttonWidget:SetText(txt)
+        labelRegion:SetText(txt or "")
+        ns.UIKit:FitFontString(labelRegion, width - 8, 1)
+    end
     buttonWidget:SetScript("OnEnter", function(self)
         if self.SetBackdropBorderColor then
             self:SetBackdropBorderColor(STYLE.accent[1], STYLE.accent[2], STYLE.accent[3], 1)
@@ -420,6 +424,7 @@ function WorldMapPinProvider.buildMapToggle()
         local hasKo = (ltVal.alliance == "얼라이언스")
         cfgBtn:SetText(hasKo and "설정" or "Config")
         presentLabel:SetText(ltVal.toggle or "Flight masters")
+        ns.UIKit:FitFontString(presentLabel, 256 - 32 - 10, 1)
         presentCheck:SetChecked(WorldMapPinProvider.isFeatureEnabled())
         local labels = { [2] = ltVal.alliance, [1] = ltVal.horde, [0] = ltVal.neutral }
         for _, WorldMapFilterButton in ipairs(factionBtns) do

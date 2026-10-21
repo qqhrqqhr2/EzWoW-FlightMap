@@ -98,3 +98,55 @@ function UIKit:ElevateModal(frame, baseLevel)
     if frame.SetFrameLevel then frame:SetFrameLevel(lvl) end
     if frame.Raise then frame:Raise() end
 end
+
+-----------------------------------------------------------------------------
+-- Text Fitting (long translations such as German must not spill out)
+-----------------------------------------------------------------------------
+local FIT_MIN_SCALE = 0.7
+
+local function setFitScale(fs, scale)
+    if fs.SetTextScale then
+        fs:SetTextScale(scale)            -- keeps the font object, so font addons still apply
+    else
+        local base = fs.ezFitBase
+        fs:SetFont(base[1], base[2] * scale, base[3])
+    end
+end
+
+-- Shrinks the text (down to 70%) until it fits maxWidth on maxLines lines.
+-- Call again after every SetText.
+function UIKit:FitFontString(fs, maxWidth, maxLines)
+    if not (fs and fs.GetStringWidth and maxWidth and maxWidth > 0) then return end
+    if not fs.SetTextScale and not fs.ezFitBase then
+        local path, size, flags = fs:GetFont()
+        if not path then return end
+        fs.ezFitBase = { path, size, flags }
+    end
+    maxLines = maxLines or 1
+    local scale = 1
+    setFitScale(fs, scale)
+    local _, baseSize = fs:GetFont()
+    local function fits()
+        if maxLines <= 1 then
+            local width = fs.GetUnboundedStringWidth and fs:GetUnboundedStringWidth() or fs:GetStringWidth()
+            return width <= maxWidth
+        end
+        local lineHeight = (baseSize or 10) * scale * 1.3
+        return fs:GetStringHeight() <= lineHeight * maxLines + 1
+    end
+    while not fits() and scale > FIT_MIN_SCALE do
+        scale = scale - 0.05
+        setFitScale(fs, scale)
+    end
+end
+
+-- Button grows with its text between minWidth and maxWidth; beyond that the text shrinks.
+function UIKit:SizeButtonToText(button, fs, minWidth, maxWidth, padding)
+    if not (button and fs) then return end
+    padding = padding or 12
+    setFitScale(fs, 1)
+    local textWidth = fs.GetUnboundedStringWidth and fs:GetUnboundedStringWidth() or fs:GetStringWidth()
+    local width = math.min(maxWidth, math.max(minWidth, math.ceil((textWidth or 0) + padding)))
+    button:SetWidth(width)
+    self:FitFontString(fs, width - padding + 4, 1)
+end
