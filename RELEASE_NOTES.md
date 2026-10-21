@@ -1,4 +1,3 @@
-# v2.0.2
+# v2.0.3
 
-- 비행 조련사 표시에서 배·비행선·지하철 정류장을 제외합니다. (Exclude transport docks from flight-master pins.)
-- 상태·오류·후원 안내의 누락 번역과 긴 문구 배치를 수정했습니다. (Translate missing status, error and support messages; fit long labels.)
+- 언어를 상자를 누르고 목록에서 고르도록 바꿨습니다. 목록에는 언어 이름이 전부 나옵니다. (Pick the language from a drop-down list with full language names instead of a grid of buttons.)
