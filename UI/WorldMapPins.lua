@@ -3,6 +3,13 @@
 -- UI/WorldMapPins.lua : WorldMap Flight Node Pins, Dock Toggle & Faction Filter Popover
 --===========================================================================
 local ADDON_NAME, ns = ...
+-- Text for the game's AddOns panel in the six languages without their own line: { deDE, frFR, esES, ruRU, zhCN, zhTW }
+local PANEL_LANG_INDEX = { deDE = 1, frFR = 2, esES = 3, esMX = 3, ruRU = 4, zhCN = 5, zhTW = 6, de = 1, fr = 2, es = 3, ru = 4 }
+local function panelText(code, ko, en, others)
+    if code == "koKR" or code == "ko" then return ko end
+    local index = PANEL_LANG_INDEX[code or ""]
+    return (index and others and others[index]) or en
+end
 local type, pairs, ipairs, tonumber, tostring, select, pcall = type, pairs, ipairs, tonumber, tostring, select, pcall
 
 local WorldMapPinProvider = ns.WorldMapPinProvider or {}
@@ -422,7 +429,7 @@ function WorldMapPinProvider.buildMapToggle()
     function WorldMapFilterPopover:RefreshPopover()
         local ltVal = WorldMapPinProvider.resolveText()
         local hasKo = (ltVal.alliance == "얼라이언스")
-        cfgBtn:SetText(hasKo and "설정" or "Config")
+        cfgBtn:SetText(panelText(hasKo and "koKR" or (ns.GetActiveLocaleKey and ns.GetActiveLocaleKey()), "설정", "Config", { "Optionen", "Options", "Opciones", "Настройки", "设置", "設定" }))
         presentLabel:SetText(ltVal.toggle or "Flight masters")
         ns.UIKit:FitFontString(presentLabel, 256 - 32 - 10, 1)
         presentCheck:SetChecked(WorldMapPinProvider.isFeatureEnabled())

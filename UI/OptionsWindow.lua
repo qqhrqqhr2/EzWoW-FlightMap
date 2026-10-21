@@ -3,6 +3,13 @@
 -- UI/OptionsWindow.lua : EzWoW Style Settings Dialog, Sliders & Slash Commands
 --===========================================================================
 local ADDON_NAME, ns = ...
+-- Text for the game's AddOns panel in the six languages without their own line: { deDE, frFR, esES, ruRU, zhCN, zhTW }
+local PANEL_LANG_INDEX = { deDE = 1, frFR = 2, esES = 3, esMX = 3, ruRU = 4, zhCN = 5, zhTW = 6, de = 1, fr = 2, es = 3, ru = 4 }
+local function panelText(code, ko, en, others)
+    if code == "koKR" or code == "ko" then return ko end
+    local index = PANEL_LANG_INDEX[code or ""]
+    return (index and others and others[index]) or en
+end
 local type, pairs, ipairs, tonumber, tostring, select, pcall = type, pairs, ipairs, tonumber, tostring, select, pcall
 
 local SettingsDialog = ns.SettingsDialog or {}
@@ -299,7 +306,8 @@ function SettingsDialog.assembleSettings(parent, x, y, width)
                 GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
                 GameTooltip:SetText(self.labelFS and self.labelFS:GetText() or "", STYLE.accent[1], STYLE.accent[2], STYLE.accent[3])
                 local hasKo = (resolveActiveLocaleKey() == "koKR")
-                local tipWidget = (hasKo and FLIGHT_TIPS_KO[self.optKey]) or FLIGHT_TIPS_EN[self.optKey] or (self.subFS and self.subFS:GetText())
+                local otherTips = ns.FLIGHT_TIPS_OTHER and ns.FLIGHT_TIPS_OTHER[resolveActiveLocaleKey()]
+                local tipWidget = (hasKo and FLIGHT_TIPS_KO[self.optKey]) or (otherTips and otherTips[self.optKey]) or FLIGHT_TIPS_EN[self.optKey] or (self.subFS and self.subFS:GetText())
                 if tipWidget and tipWidget ~= "" then
                     GameTooltip:AddLine(tipWidget, 0.85, 0.90, 0.94, true)
                 end
@@ -480,7 +488,7 @@ switchSettingsPopup = function()
         local function resolveResetBtnLabel()
             if currentState.open then return L.BTN_DEFAULT end
             local hasKo = (L.SETTINGS == "설정")
-            return hasKo and "창·버튼 위치 초기화" or "Reset Window Position"
+            return panelText(resolveActiveLocaleKey(), "창·버튼 위치 초기화", "Reset Window Position", { "Fenster- und Knopfposition zurücksetzen", "Réinitialiser fenêtre et bouton", "Restablecer ventana y botón", "Сбросить позицию окна и кнопки", "重置窗口与按钮位置", "重設視窗與按鈕位置" })
         end
 
         popupDefaultBtn = createFlightMapButton(settingsPopoverFrame, 184, 28, false, function()
@@ -538,7 +546,7 @@ switchSettingsPopup = function()
         popupRefresh()
         if popupDefaultBtn then
             local hasKo = (L.SETTINGS == "설정")
-            popupDefaultBtn:SetText(currentState.open and L.BTN_DEFAULT or (hasKo and "창·버튼 위치 초기화" or "Reset Window Position"))
+            popupDefaultBtn:SetText(currentState.open and L.BTN_DEFAULT or panelText(resolveActiveLocaleKey(), "창·버튼 위치 초기화", "Reset Window Position", { "Fenster- und Knopfposition zurücksetzen", "Réinitialiser fenêtre et bouton", "Restablecer ventana y botón", "Сбросить позицию окна и кнопки", "重置窗口与按钮位置", "重設視窗與按鈕位置" }))
         end
         settingsPopoverFrame:Show()
         settingsPopoverFrame:Raise()
@@ -577,9 +585,9 @@ function SettingsDialog.registerOptionsPanel()
 
     local function syncPanel()
         local hasKo = (L.SETTINGS == "설정")
-        desc:SetText(hasKo and "비행 조련사의 비행 지점 이름·요금·소요 시간과 세계지도 비행 조련사 위치를 표시합니다." or "Displays flight point names, fares, flight times, and world map flight master locations.")
+        desc:SetText(panelText(resolveActiveLocaleKey(), "비행 조련사의 비행 지점 이름·요금·소요 시간과 세계지도 비행 조련사 위치를 표시합니다.", "Displays flight point names, fares, flight times, and world map flight master locations.", { "Zeigt Namen, Kosten und Flugzeiten der Flugpunkte sowie die Flugmeister auf der Weltkarte.", "Affiche le nom, le prix et la durée des vols, ainsi que les maîtres de vol sur la carte du monde.", "Muestra nombres, tarifas y duración de los vuelos, y los maestros de vuelo en el mapa del mundo.", "Показывает названия точек полёта, стоимость, время в пути и распорядителей полётов на карте мира.", "显示飞行点名称、费用、飞行时间以及世界地图上的飞行管理员位置。", "顯示飛行點名稱、費用、飛行時間以及世界地圖上的飛行管理員位置。" }))
         launchBtn:SetText((L.SETTINGS or "설정") .. " (/ezfl)")
-        hint:SetText(hasKo and "채팅창에 /ezfl 또는 /ezfl config를 입력해도 열립니다." or "Type /ezfl or /ezfl config in chat to open settings.")
+        hint:SetText(panelText(resolveActiveLocaleKey(), "채팅창에 /ezfl 또는 /ezfl config를 입력해도 열립니다.", "Type /ezfl or /ezfl config in chat to open settings.", { "Du kannst die Einstellungen auch mit /ezfl oder /ezfl config im Chat öffnen.", "Vous pouvez aussi ouvrir les options en tapant /ezfl ou /ezfl config dans le chat.", "También puedes abrir las opciones escribiendo /ezfl o /ezfl config en el chat.", "Настройки также открываются командой /ezfl или /ezfl config в чате.", "也可以在聊天框输入 /ezfl 或 /ezfl config 打开设置。", "也可以在聊天框輸入 /ezfl 或 /ezfl config 開啟設定。" }))
     end
     allSettingRefreshers[#allSettingRefreshers + 1] = syncPanel
     panelFrameEntry:SetScript("OnShow", syncPanel)
