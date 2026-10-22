@@ -20,7 +20,7 @@
 ## Notes-zhCN: 与飞行管理员对话时在独立干净的窗口中显示飞行点、目的地名称、费用与飞行时间。
 ## Notes-zhTW: 與飛行管理員對話時在獨立乾淨的視窗中顯示飛行點、目的地名稱、費用與飛行時間。
 ## Author: qqhrqqhr2
-## Version: 2.0.3
+## Version: 2.0.4
 ## Category: EzWoW
 ## IconTexture: Interface\AddOns\EzWoW-FlightMap\Media\Icon
 ## SavedVariables: EzWoW_FlightMapDB
