@@ -172,6 +172,8 @@ function EzWoWFlightMapPinMixin:OnLoad()
     self.Icon:SetAllPoints()
 end
 function EzWoWFlightMapPinMixin:OnAcquired(entry)
+    -- the template must have run OnLoad (Ring/Icon); create them lazily if it did not
+    if not (self.Ring and self.Icon) then self:OnLoad() end
     self.node = entry.node
     local windowFrame = WorldMapPinProvider.resolveFactionInfo(self.node.faction)
     self.Ring:SetVertexColor(windowFrame[2], windowFrame[3], windowFrame[4])

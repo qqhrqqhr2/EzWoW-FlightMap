@@ -715,11 +715,20 @@ function FlightMapWindow.layoutNonOverlappingLabels(shown)
         end
         
         if not bestX or bestOverlap>0 then
-            for coordY=0,maxY,12 do
-                for coordX=0,maxX,16 do consider(coordX,coordY) end
+            -- A candidate scores at least dx^2 (and 1.3*dy^2), so once a best
+            -- score exists only the box within that distance can win; limit
+            -- the full-map scan to it (grid-aligned) to avoid frame spikes.
+            local gx0,gx1,gy0,gy1=0,maxX,0,maxY
+            if bestScore then
+                local rxVal,ryVal=sqrt(bestScore),sqrt(bestScore/1.3)
+                gx0=max(0,floor((pxVal-boxWidth-rxVal)/16)*16);gx1=min(maxX,pxVal+rxVal)
+                gy0=max(0,floor((pyVal-headerBar-ryVal)/12)*12);gy1=min(maxY,pyVal+ryVal)
+            end
+            for coordY=gy0,gy1,12 do
+                for coordX=gx0,gx1,16 do consider(coordX,coordY) end
                 consider(maxX,coordY)
             end
-            for coordX=0,maxX,16 do consider(coordX,maxY) end
+            for coordX=gx0,gx1,16 do consider(coordX,maxY) end
         end
         if bestX then
             placed[#placed+1]={bestX,bestY,boxWidth,headerBar}
@@ -1529,6 +1538,18 @@ function FlightMapWindow.onGossipShow()
     end
 end
 
+-- Pre-mask the default taxi UI as soon as it shows so it does not flash for a
+-- frame before the custom window opens. FlightMapFrame is load-on-demand on
+-- Mainline-style clients, so it is hooked when its addon loads.
+local preMaskHooked = {}
+local function hookPreMask(frameName)
+    local f = _G[frameName]
+    if f and not preMaskHooked[f] and f.HookScript then
+        preMaskHooked[f] = true
+        f:HookScript("OnShow", FlightMapWindow.preMaskDefaultFlightFrame)
+    end
+end
+
 local eventFrame = CreateFrame("Frame")
 eventFrame:RegisterEvent("ADDON_LOADED")
 eventFrame:RegisterEvent("TAXIMAP_OPENED")
@@ -1539,9 +1560,9 @@ eventFrame:SetScript("OnEvent", function(_, event, arg1)
         if arg1 == ADDON_NAME then
             bootstrapDB()
             if ns.RegisterOptionsPanel then ns.OptionsPanel = ns.RegisterOptionsPanel() end
-            local tfVal = _G.TaxiFrame
-            if tfVal and tfVal.HookScript then tfVal:HookScript("OnShow", FlightMapWindow.preMaskDefaultFlightFrame) end
-
+            for _, frameName in ipairs(BLIZZARD_FRAMES) do hookPreMask(frameName) end
+        elseif arg1 == "Blizzard_FlightMap" then
+            hookPreMask("FlightMapFrame")
         end
     elseif event == "TAXIMAP_OPENED" then
         currentState.open = true

@@ -10,7 +10,7 @@ local tsort = table.sort
 local WorldMapDockManager = ns.WorldMapDockManager or {}
 ns.WorldMapDockManager = WorldMapDockManager
 
-local DOCK_PROTOCOL_VERSION = 3
+local DOCK_PROTOCOL_VERSION = 4
 local DOCK_SLOT_PRIORITY = {
     EzWoW_MapFinder         = 1,
     EzWoW_FlightMap         = 2,
@@ -105,7 +105,17 @@ if type(DockCoordinator) ~= "table" or (DockCoordinator.version or 0) < DOCK_PRO
         local canvas = self:GetCanvas()
         if not canvas then return end
         self._inLayout = true
+        -- Always clear the re-entry guard, even if a layout step errors;
+        -- otherwise the dock would never be laid out again this session.
+        local ok, err = pcall(self.LayoutEntries, self, canvas)
+        self._inLayout = false
+        if not ok then
+            local handler = geterrorhandler and geterrorhandler()
+            if handler then handler(err) end
+        end
+    end
 
+    function DockCoordinator:LayoutEntries(canvas)
         local dockedEntries = {}
         for _, entry in pairs(self.items) do
             local btn = entry.button
@@ -151,8 +161,6 @@ if type(DockCoordinator) ~= "table" or (DockCoordinator.version or 0) < DOCK_PRO
                 pcall(entry.onDockedLayout, btn, canvas, idx, totalDocked, posX, posY)
             end
         end
-
-        self._inLayout = false
     end
 
     function DockCoordinator:EnsureHooks()
