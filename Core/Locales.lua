@@ -53,6 +53,7 @@ local LOCALES = {
         OPT_BAR      = "Show remaining flight time bar",
         OPT_BAR_SUB  = "Drag the bar to move it",
         OPT_ALERT    = "Play a sound and flash the taskbar on arrival",
+        OPT_SOON     = "Alert shortly before landing",
         OPT_CONFIRM  = "Confirm before flying",
         OPT_LIST     = "Show destination list",
         OPT_LIST_SUB = "Searchable, sortable list with favorites next to the map",
@@ -91,6 +92,8 @@ local LOCALES = {
         MSG_SKIP     = "Skip flight master dialog: %s",
         MSG_BAR      = "Remaining flight time bar: %s",
         MSG_ALERT    = "Arrival alert: %s",
+        MSG_SOON     = "Arriving at %s in about %d sec.",
+        MSG_SOON_SET = "Arriving-soon alert: %s (%d sec before landing)",
         MSG_RESET    = "Window position and size reset.",
         MSG_LANG     = "Language set to: %s",
         MSG_ERROR    = "Error, showing the default flight map instead: %s",
@@ -105,6 +108,7 @@ local LOCALES = {
             "/ezfl alpha 0-70  - window transparency (%)",
             "/ezfl bar  - toggle the remaining flight time bar",
             "/ezfl alert  - toggle the arrival alert",
+            "/ezfl soon [5-120]  - toggle the arriving-soon alert / set its seconds",
             "/ezfl reset  - reset window position and size",
             "/ezfl donate  - show the donation link",
         },
@@ -165,6 +169,7 @@ local LOCALES = {
         OPT_BAR      = "남은 비행 시간 막대 표시",
         OPT_BAR_SUB  = "막대는 드래그해서 옮길 수 있습니다",
         OPT_ALERT    = "도착하면 소리와 작업 표시줄 깜빡임으로 알림",
+        OPT_SOON     = "착륙 직전에 미리 알림",
         OPT_CONFIRM  = "비행 전 확인 창 표시",
         OPT_LIST     = "목적지 목록 표시",
         OPT_LIST_SUB = "지도 옆에 검색·정렬·즐겨찾기 목록을 보여줍니다",
@@ -203,6 +208,8 @@ local LOCALES = {
         MSG_SKIP     = "비행 조련사 대화창 건너뛰기: %s",
         MSG_BAR      = "남은 비행 시간 막대: %s",
         MSG_ALERT    = "도착 알림: %s",
+        MSG_SOON     = "%s에 약 %d초 후 도착합니다.",
+        MSG_SOON_SET = "도착 직전 알림: %s (착륙 %d초 전)",
         MSG_RESET    = "창 위치와 크기 초기화했습니다.",
         MSG_LANG     = "언어 설정: %s",
         MSG_ERROR    = "오류가 나서 기본 비행 지도를 표시합니다: %s",
@@ -217,6 +224,7 @@ local LOCALES = {
             "/ezfl alpha 0~70  - 창 투명도(%)",
             "/ezfl bar  - 남은 비행 시간 막대 켜기/끄기",
             "/ezfl alert  - 도착 알림 켜기/끄기",
+            "/ezfl soon [5~120]  - 도착 직전 알림 켜기/끄기 · 몇 초 전에 알릴지 설정",
             "/ezfl reset  - 창 위치와 크기 초기화",
             "/ezfl donate  - 후원 주소 보기",
         },
@@ -809,6 +817,7 @@ local FLIGHT_TIPS_KO = {
     autoSearch        = "전용 비행 지도가 열리자마자 검색창에 바로 타자를 칠 수 있도록 입력 포커스를 자동으로 맞춥니다.",
     flightBar         = "비행 중 화면에 목적지까지 남은 비행 시간과 경유지 진행 상황을 막대(타이머 바)로 표시합니다.",
     arrivalAlert      = "비행 목적지에 도착했을 때 알림음을 재생하고 윈도우 작업 표시줄 아이콘을 깜빡여 알려줍니다.",
+    soonAlert         = "예상 비행 시간을 기준으로 착륙 몇 초 전에 알림음과 채팅 메시지로 알려줍니다. 기본 15초이며 /ezfl soon 숫자 로 바꿀 수 있습니다.",
 }
 
 local FLIGHT_TIPS_EN = {
@@ -825,6 +834,7 @@ local FLIGHT_TIPS_EN = {
     autoSearch        = "Automatically focuses the search box as soon as the flight map opens.",
     flightBar         = "Displays an in-flight progress bar showing remaining travel time and stops.",
     arrivalAlert      = "Plays an alert sound and flashes the taskbar when your flight arrives.",
+    soonAlert         = "Uses the estimated flight time to warn you with a sound and a chat message a few seconds before landing. 15 seconds by default; change it with /ezfl soon <seconds>.",
 }
 
 ns.FLIGHT_TIPS_KO = FLIGHT_TIPS_KO
@@ -879,6 +889,24 @@ LOCALES.esES["MSG_LIST"] = "Lista de destinos: %s"
 LOCALES.ruRU["MSG_LIST"] = "Список пунктов назначения: %s"
 LOCALES.zhCN["MSG_LIST"] = "目的地列表：%s"
 LOCALES.zhTW["MSG_LIST"] = "目的地清單：%s"
+LOCALES.deDE["OPT_SOON"] = "Kurz vor der Landung warnen"
+LOCALES.frFR["OPT_SOON"] = "Prévenir peu avant l'atterrissage"
+LOCALES.esES["OPT_SOON"] = "Avisar poco antes de aterrizar"
+LOCALES.ruRU["OPT_SOON"] = "Предупреждать незадолго до посадки"
+LOCALES.zhCN["OPT_SOON"] = "即将降落时提前提醒"
+LOCALES.zhTW["OPT_SOON"] = "即將降落時提前提醒"
+LOCALES.deDE["MSG_SOON"] = "Ankunft in %s in etwa %d Sek."
+LOCALES.frFR["MSG_SOON"] = "Arrivée à %s dans environ %d s."
+LOCALES.esES["MSG_SOON"] = "Llegada a %s en unos %d s."
+LOCALES.ruRU["MSG_SOON"] = "Прибытие в %s примерно через %d с."
+LOCALES.zhCN["MSG_SOON"] = "%s：约 %d 秒后到达。"
+LOCALES.zhTW["MSG_SOON"] = "%s：約 %d 秒後抵達。"
+LOCALES.deDE["MSG_SOON_SET"] = "Warnung vor der Landung: %s (%d Sek. vorher)"
+LOCALES.frFR["MSG_SOON_SET"] = "Alerte avant l'atterrissage : %s (%d s avant)"
+LOCALES.esES["MSG_SOON_SET"] = "Aviso antes de aterrizar: %s (%d s antes)"
+LOCALES.ruRU["MSG_SOON_SET"] = "Предупреждение перед посадкой: %s (за %d с)"
+LOCALES.zhCN["MSG_SOON_SET"] = "降落前提醒：%s（提前 %d 秒）"
+LOCALES.zhTW["MSG_SOON_SET"] = "降落前提醒：%s（提前 %d 秒）"
 LOCALES.deDE["MSG_ALERT"] = "Ankunftsmeldung: %s"
 LOCALES.frFR["MSG_ALERT"] = "Alerte d'arrivée : %s"
 LOCALES.esES["MSG_ALERT"] = "Aviso de llegada: %s"
@@ -938,6 +966,7 @@ local FLIGHT_TIPS_OTHER = {
         autoSearch = "Setzt beim Öffnen der Flugkarte sofort den Cursor ins Suchfeld.",
         flightBar = "Zeigt während des Flugs einen Balken mit Restzeit und Zwischenstopps.",
         arrivalAlert = "Spielt bei der Ankunft einen Ton und lässt die Taskleiste blinken.",
+        soonAlert = "Warnt anhand der geschätzten Flugzeit einige Sekunden vor der Landung mit Ton und Chatmeldung. Standard 15 Sek., ändern mit /ezfl soon <Sekunden>.",
     },
     frFR = {
         enabled = "Utilise la fenêtre dédiée EzWoW - Flight Map au lieu de la carte de vol par défaut.",
@@ -953,6 +982,7 @@ local FLIGHT_TIPS_OTHER = {
         autoSearch = "Place le curseur dans la recherche dès l'ouverture de la carte.",
         flightBar = "Affiche pendant le vol une barre avec le temps restant et les escales.",
         arrivalAlert = "Joue un son et fait clignoter la barre des tâches à l'arrivée.",
+        soonAlert = "D'après la durée estimée, prévient par un son et un message quelques secondes avant l'atterrissage. 15 s par défaut, modifiable avec /ezfl soon <secondes>.",
     },
     esES = {
         enabled = "Usa la ventana propia de EzWoW - Flight Map en lugar del mapa de vuelo predeterminado.",
@@ -968,6 +998,7 @@ local FLIGHT_TIPS_OTHER = {
         autoSearch = "Coloca el cursor en la búsqueda nada más abrir el mapa.",
         flightBar = "Muestra durante el vuelo una barra con el tiempo restante y las paradas.",
         arrivalAlert = "Reproduce un sonido y hace parpadear la barra de tareas al llegar.",
+        soonAlert = "Según el tiempo estimado, avisa con un sonido y un mensaje unos segundos antes de aterrizar. 15 s por defecto; cámbialo con /ezfl soon <segundos>.",
     },
     ruRU = {
         enabled = "Использует отдельное окно EzWoW - Flight Map вместо стандартной карты полётов.",
@@ -983,6 +1014,7 @@ local FLIGHT_TIPS_OTHER = {
         autoSearch = "Сразу ставит курсор в поле поиска при открытии карты.",
         flightBar = "Во время полёта показывает полосу с оставшимся временем и остановками.",
         arrivalAlert = "При прибытии проигрывает звук и мигает панелью задач.",
+        soonAlert = "По расчётному времени полёта предупреждает звуком и сообщением в чате за несколько секунд до посадки. По умолчанию 15 с; изменить: /ezfl soon <секунды>.",
     },
     zhCN = {
         enabled = "使用 EzWoW - Flight Map 专用窗口代替默认飞行地图。",
@@ -998,6 +1030,7 @@ local FLIGHT_TIPS_OTHER = {
         autoSearch = "打开飞行地图时自动聚焦搜索框。",
         flightBar = "飞行中显示剩余时间和经停点的进度条。",
         arrivalAlert = "到达时播放提示音并闪烁任务栏。",
+        soonAlert = "根据预计飞行时间，在降落前几秒用提示音和聊天消息提醒。默认 15 秒，可用 /ezfl soon <秒数> 修改。",
     },
     zhTW = {
         enabled = "使用 EzWoW - Flight Map 專用視窗取代預設飛行地圖。",
@@ -1013,6 +1046,7 @@ local FLIGHT_TIPS_OTHER = {
         autoSearch = "開啟飛行地圖時自動聚焦搜尋框。",
         flightBar = "飛行中顯示剩餘時間和經停點的進度條。",
         arrivalAlert = "抵達時播放提示音並閃爍工作列。",
+        soonAlert = "根據預計飛行時間，在降落前幾秒以提示音和聊天訊息提醒。預設 15 秒，可用 /ezfl soon <秒數> 修改。",
     },
 }
 FLIGHT_TIPS_OTHER.esMX = FLIGHT_TIPS_OTHER.esES

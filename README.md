@@ -7,7 +7,7 @@
 
 **[한국어](#한국어) · [English](#english)**
 
-WoW Forever (`Interface: 16001`) · `v0.6.2` · `/ezfl`
+WoW Forever (`Interface: 16001`) · `/ezfl` · `/미니게임`
 
 ---
 
@@ -42,7 +42,7 @@ WoW Forever (`Interface: 16001`) · `v0.6.2` · `/ezfl`
 | ③ | 검색 | 이름 일부를 입력하면 목록이 걸러집니다. **Enter**를 누르면 첫 번째 비행 가능 목적지로 바로 출발합니다. |
 | ④ | 정렬 · 즐겨찾기 | 이름/시간/요금 정렬. 별(★)을 누르면 즐겨찾기가 되고, 즐겨찾기와 이 조련사에서 **최근** 간 곳은 맨 위에 고정됩니다. 소지금보다 비싼 곳은 빨간색입니다. |
 | ⑤ | 경로 강조 · 툴팁 | 목적지에 마우스를 올리면 경로선과 이동 방향 빛 애니메이션, 경유지 수, 요금, 시간이 나옵니다. 클릭하면 비행합니다. |
-| ⑥ | 남은 시간 막대 | 비행 중 남은 시간, 경유 구간(경유 1/2), 도착 예정 시각을 보여 줍니다. 도착하면 소리와 작업 표시줄 깜빡임으로 알려 줍니다. 막대는 끌어서 옮길 수 있습니다. |
+| ⑥ | 남은 시간 막대 | 비행 중 남은 시간, 경유 구간(경유 1/2), 도착 예정 시각을 보여 줍니다. 도착하면 소리와 작업 표시줄 깜빡임으로 알려 줍니다. 막대는 끌어서 옮길 수 있고, 비행 중에 `/reload`하거나 다시 접속해도 이어서 표시됩니다. 막대 오른쪽의 **미니게임** 버튼으로 미니게임 창을 엽니다. |
 
 #### 요금 · 시간 표기
 
@@ -76,7 +76,17 @@ WoW Forever (`Interface: 16001`) · `v0.6.2` · `/ezfl`
 | ⑤ | 창 크기 · 창 투명도 · 글자 크기 | 50~120% · 0~70% · 8~14 | 100% · 0% · 12 |
 | ⑥ | 남은 비행 시간 막대 표시 | 비행 타이머 막대 | 켬 |
 | ⑥ | 도착하면 소리와 작업 표시줄 깜빡임으로 알림 | 도착 알림 | 켬 |
+| ⑥ | 착륙 직전에 미리 알림 | 예상 비행 시간 기준으로 착륙 몇 초 전(기본 15초)에 소리와 채팅 메시지로 알림. `/ezfl soon 숫자`로 초 변경 | 끔 |
 | | 창·버튼 위치 초기화 / 후원하기 | 지도 창·막대·세계지도 버튼 위치와 크기 초기화 | - |
+
+### 미니게임 (`/미니게임`, `/ezgames`)
+
+비행하는 동안 가볍게 즐길 수 있는 **지뢰찾기 · 짝 맞추기 · 퍼즐 맞추기 · 솔리테어**가 들어 있습니다.
+
+- 비행을 시작하면 미니게임 창이 자동으로 열리고, 착륙하면 닫힙니다. 게임을 하는 중이면 착륙해도 닫히지 않습니다. 창 아래 **비행을 시작하면 자동으로 열기**를 끄면 자동으로 열리지 않습니다.
+- 언제든 `/미니게임` 또는 `/ezgames`, 또는 남은 시간 막대 오른쪽의 **미니게임** 버튼으로 열고 닫을 수 있습니다.
+- 게임마다 난이도를 고를 수 있고, 최고 기록과 진행 중인 판이 저장되어 `/reload`나 다시 접속한 뒤에도 이어서 할 수 있습니다.
+- 창 오른쪽 아래 모서리를 끌거나 **Ctrl + 마우스 휠**로 크기를 바꿉니다.
 
 ### 명령어 (`/ezfl`, `/efm`, `/ezwowflightmap`, `/비행지도`)
 
@@ -87,6 +97,8 @@ WoW Forever (`Interface: 16001`) · `v0.6.2` · `/ezfl`
 | `/ezfl skip` | 대화창 건너뛰기 켜기/끄기 |
 | `/ezfl labels` · `/ezfl list` · `/ezfl all` · `/ezfl crop` | 이름표 · 목적지 목록 · 미발견 지점 · 확대 보기 켜기/끄기 |
 | `/ezfl bar` · `/ezfl alert` | 남은 시간 막대 · 도착 알림 켜기/끄기 |
+| `/ezfl soon` · `/ezfl soon 5~120` | 착륙 직전 알림 켜기/끄기 · 몇 초 전에 알릴지 설정 |
+| `/미니게임` · `/ezgames` | 미니게임 창 열기/닫기 |
 | `/ezfl scale 50~120` · `/ezfl alpha 0~70` | 창 크기(%) · 창 투명도(%) |
 | `/ezfl reset` | 창 위치·크기 초기화 |
 | `/ezfl lang <auto\|ko\|en\|de\|fr\|es\|ru\|zhcn\|zhtw>` | 표시 언어 변경 |
@@ -94,7 +106,7 @@ WoW Forever (`Interface: 16001`) · `v0.6.2` · `/ezfl`
 
 ### 저장 데이터
 
-- `EzWoW_FlightMapDB`: 설정, 즐겨찾기, 최근 목적지, 실측 비행 시간, 창 위치.
+- `EzWoW_FlightMapDB`: 설정, 즐겨찾기, 최근 목적지, 실측 비행 시간, 창 위치, 진행 중인 비행, 미니게임 기록과 진행 중인 판.
 
 ---
 
@@ -129,7 +141,7 @@ When you talk to a flight master (gryphon, wyvern, bat or hippogryph), Flight Ma
 | ③ | Search | Type part of a name to filter. **Enter** flies to the first reachable result. |
 | ④ | Sort · favourites | Sort by name, time or fare. Click the star (★) to favourite; favourites and the **Recent** destination for this flight master stay on top. Destinations you cannot afford are red. |
 | ⑤ | Route highlight · tooltip | Hover a destination to see the path with a moving light, number of stops, fare and time. Click to fly. |
-| ⑥ | Flight timer bar | Time left, current leg (stop 1/2) and arrival clock time. Plays a sound and flashes the taskbar on arrival. Drag the bar to move it. |
+| ⑥ | Flight timer bar | Time left, current leg (stop 1/2) and arrival clock time. Plays a sound and flashes the taskbar on arrival. Drag the bar to move it; it comes back after a `/reload` or reconnect during the flight. The **Mini Games** button on the right of the bar opens the mini games window. |
 
 #### Fare and time notation
 
@@ -163,7 +175,17 @@ When you talk to a flight master (gryphon, wyvern, bat or hippogryph), Flight Ma
 | ⑤ | Window size · Window transparency · Text size | 50–120% · 0–70% · 8–14 | 100% · 0% · 12 |
 | ⑥ | Show remaining flight time bar | Flight timer bar | On |
 | ⑥ | Play a sound and flash the taskbar on arrival | Arrival alert | On |
+| ⑥ | Alert shortly before landing | Sound and chat message a few seconds (15 by default) before the estimated landing. Change the seconds with `/ezfl soon <seconds>` | Off |
 | | Reset Window Position / Donate | Resets map window, bar and World Map button positions and size | - |
+
+### Mini games (`/ezgames`, `/미니게임`)
+
+**Minesweeper · Memory · Sliding Puzzle · Solitaire** to pass the time while flying.
+
+- The mini games window opens by itself when a flight starts and closes on landing, unless a game is still being played. Untick **Open when a flight starts** at the bottom of the window to stop this.
+- Open or close it at any time with `/ezgames` (`/미니게임`) or the **Mini Games** button on the right of the flight timer bar.
+- Each game has difficulty levels; best times and unfinished boards are saved, so you can carry on after a `/reload` or relog.
+- Drag the bottom-right corner or use **Ctrl + mouse wheel** to resize the window.
 
 ### Slash commands (`/ezfl`, `/efm`, `/ezwowflightmap`, `/비행지도`)
 
@@ -174,6 +196,8 @@ When you talk to a flight master (gryphon, wyvern, bat or hippogryph), Flight Ma
 | `/ezfl skip` | Toggle gossip skipping |
 | `/ezfl labels` · `/ezfl list` · `/ezfl all` · `/ezfl crop` | Toggle labels · list · undiscovered points · zoom |
 | `/ezfl bar` · `/ezfl alert` | Toggle timer bar · arrival alert |
+| `/ezfl soon` · `/ezfl soon 5-120` | Toggle the arriving-soon alert · set how many seconds before landing |
+| `/ezgames` · `/미니게임` | Open or close the mini games window |
 | `/ezfl scale 50-120` · `/ezfl alpha 0-70` | Window size (%) · transparency (%) |
 | `/ezfl reset` | Reset window position and size |
 | `/ezfl lang <auto\|ko\|en\|de\|fr\|es\|ru\|zhcn\|zhtw>` | Change display language |
@@ -181,7 +205,7 @@ When you talk to a flight master (gryphon, wyvern, bat or hippogryph), Flight Ma
 
 ### Saved data
 
-- `EzWoW_FlightMapDB`: settings, favourites, recent destinations, recorded flight times, window positions.
+- `EzWoW_FlightMapDB`: settings, favourites, recent destinations, recorded flight times, window positions, the flight in progress, mini game records and unfinished boards.
 
 ---
 

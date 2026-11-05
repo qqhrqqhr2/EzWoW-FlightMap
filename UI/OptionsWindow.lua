@@ -141,6 +141,7 @@ local SETTINGS = {
     { kind = "header", label = "HEAD_FLIGHT" },
     { kind = "check",  key = "flightBar",         label = "OPT_BAR", sub = "OPT_BAR_SUB" },
     { kind = "check",  key = "arrivalAlert",      label = "OPT_ALERT" },
+    { kind = "check",  key = "soonAlert",         label = "OPT_SOON" },
 }
 
 local allSettingRefreshers = {}
@@ -666,6 +667,16 @@ SlashCmdList.EZWOWFLIGHTMAP = function(msg)
         SettingsDialog.toggleBooleanOption("flightBar", L.MSG_BAR)
     elseif cmd == "alert" then
         SettingsDialog.toggleBooleanOption("arrivalAlert", L.MSG_ALERT)
+    elseif cmd == "soon" then
+        if numericVal then
+            ns.DB.soonAlertSeconds = max(5, min(120, floor(numericVal)))
+            ns.DB.soonAlert = true
+        else
+            ns.DB.soonAlert = not ns.DB.soonAlert
+        end
+        for _, refreshSetting in ipairs(allSettingRefreshers) do pcall(refreshSetting) end
+        printAddonChatMessage(L.MSG_SOON_SET:format(SettingsDialog.formatBooleanStateLabel(ns.DB.soonAlert),
+            tonumber(ns.DB.soonAlertSeconds) or 15))
     elseif cmd == "list" then
         SettingsDialog.toggleBooleanOption("showList", L.MSG_LIST)
     elseif cmd == "scale" then

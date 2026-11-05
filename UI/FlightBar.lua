@@ -24,6 +24,34 @@ local computeHopDistanceRatios = ns.CalculateRouteHopProgressFractions
 
 local flightTimerBarFrame
 local pending
+local SOON_DEFAULT, SOON_MIN, SOON_MAX = 15, 5, 120
+
+-----------------------------------------------------------------------------
+-- Keeping the running flight across /reload and reconnects
+-- pending.start is GetTime()-based, so the saved copy uses wall-clock time.
+-----------------------------------------------------------------------------
+function InFlightTimerBar.saveActiveFlight()
+    if not (ns.DB and pending and pending.start) then return end
+    local nowEpoch = time and time()
+    if not nowEpoch then return end
+    ns.DB.activeFlight = {
+        key = pending.key, dest = pending.dest, dist = pending.dist, hops = pending.hops,
+        hopFractions = pending.hopFractions, speedKey = pending.speedKey,
+        speedMultiplier = pending.speedMultiplier, total = pending.total, recorded = pending.recorded,
+        earlyLanding = pending.earlyLanding, noRecord = pending.noRecord,
+        startEpoch = nowEpoch - (GetTime() - pending.start),
+    }
+end
+
+function InFlightTimerBar.clearActiveFlight()
+    if ns.DB then ns.DB.activeFlight = nil end
+end
+
+function InFlightTimerBar.soonSeconds()
+    local v = ns.DB and tonumber(ns.DB.soonAlertSeconds)
+    if not v then return SOON_DEFAULT end
+    return max(SOON_MIN, min(SOON_MAX, floor(v)))
+end
 
 function InFlightTimerBar.persistBarPosition()
     local anchorTarget, _, relativePoint, coordX, coordY = flightTimerBarFrame:GetPoint(1)
@@ -73,6 +101,31 @@ function InFlightTimerBar.ensureFlightTimerBar()
     flightTimerBarFrame.time:SetJustifyH("RIGHT")
     flightTimerBarFrame.dest:SetPoint("RIGHT", flightTimerBarFrame.time, "LEFT", -6, 0)
     if flightTimerBarFrame.dest.SetWordWrap then flightTimerBarFrame.dest:SetWordWrap(false) end
+
+    -- mini games button on the right of the bar (shared module)
+    if _G.EzWoW_MiniGames then
+        local games = CreateFrame("Button", nil, flightTimerBarFrame, BackdropTemplateMixin and "BackdropTemplate" or nil)
+        games:SetHeight(24)
+        games:SetPoint("LEFT", flightTimerBarFrame, "RIGHT", 4, 0)
+        if games.SetBackdrop then
+            games:SetBackdrop(BACKDROP)
+            games:SetBackdropColor(STYLE.bgPrimary[1], STYLE.bgPrimary[2], STYLE.bgPrimary[3], 0.94)
+            games:SetBackdropBorderColor(STYLE.border[1], STYLE.border[2], STYLE.border[3], 1)
+        end
+        games.t = games:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        games.t:SetPoint("CENTER")
+        games.t:SetText(_G.EzWoW_MiniGames.T("title"))
+        games.t:SetTextColor(STYLE.accent[1], STYLE.accent[2], STYLE.accent[3])
+        games:SetWidth(games.t:GetStringWidth() + 18)
+        games:SetScript("OnEnter", function(self)
+            if self.SetBackdropBorderColor then self:SetBackdropBorderColor(STYLE.accent[1], STYLE.accent[2], STYLE.accent[3], 1) end
+        end)
+        games:SetScript("OnLeave", function(self)
+            if self.SetBackdropBorderColor then self:SetBackdropBorderColor(STYLE.border[1], STYLE.border[2], STYLE.border[3], 1) end
+        end)
+        games:SetScript("OnClick", function() _G.EzWoW_MiniGames.Toggle() end)
+        flightTimerBarFrame.games = games
+    end
 
     flightTimerBarFrame:ClearAllPoints()
     local anchorPoint = ns.DB.barPoint
@@ -133,6 +186,26 @@ function InFlightTimerBar.concealFlightTimerBar()
     if flightTimerBarFrame then flightTimerBarFrame:Hide() end
 end
 
+-- "Arriving soon": once per flight, a few seconds before the estimated landing
+function InFlightTimerBar.checkArrivingSoon(now)
+    if not (ns.DB and ns.DB.soonAlert and pending and pending.start and not pending.soonFired) then return end
+    local total = pending.total
+    if not (resolveFiniteNumber(total) and total > 0) then return end
+    local seconds = InFlightTimerBar.soonSeconds()
+    -- a flight shorter than the warning itself needs no warning
+    if total <= seconds + 5 then pending.soonFired = true return end
+    local remain = total - (now - pending.start)
+    if remain > seconds then return end
+    pending.soonFired = true
+    if remain <= 0 then return end
+    printAddonChatMessage(L.MSG_SOON:format(shortName(pending.dest), floor(remain + 0.5)))
+    if PlaySound then
+        local soundID = (SOUNDKIT and SOUNDKIT.RAID_WARNING) or 8959
+        pcall(PlaySound, soundID, "Master")
+    end
+    if FlashClientIcon then pcall(FlashClientIcon) end
+end
+
 function InFlightTimerBar.triggerArrivalNotification()
     if not ns.DB.arrivalAlert then return end
     if PlaySound then
@@ -159,6 +232,7 @@ watcher:SetScript("OnUpdate", function(self, elapsed)
     if not pending.start then
         if isPlayerInFlight then
             pending.start = now
+            InFlightTimerBar.saveActiveFlight()
             InFlightTimerBar.displayFlightTimerBar()
         elseif now - pending.t0 > 15 then
             pending = nil
@@ -166,9 +240,16 @@ watcher:SetScript("OnUpdate", function(self, elapsed)
         end
     elseif isPlayerInFlight then
         InFlightTimerBar.refreshFlightTimerBar(now)
+        InFlightTimerBar.checkArrivingSoon(now)
     else
         local dur = now - pending.start
+        -- a flight picked up again after a fresh login may include time spent
+        -- offline, so it is not used as a recorded time
         local arrived = not pending.earlyLanding
+        if pending.noRecord then
+            if arrived then InFlightTimerBar.triggerArrivalNotification() end
+            arrived = false
+        end
         if arrived and dur >= 5 and dur <= 3600 and ns.DB then
             local updatedVal = floor(dur + 0.5)
             local previousVal = ns.DB.times[pending.key]
@@ -189,9 +270,62 @@ watcher:SetScript("OnUpdate", function(self, elapsed)
             InFlightTimerBar.triggerArrivalNotification()
         end
         pending = nil
+        InFlightTimerBar.clearActiveFlight()
         InFlightTimerBar.concealFlightTimerBar()
         self:Hide()
     end
+end)
+
+-- After /reload or a reconnect in the air: rebuild the bar from the saved flight.
+function InFlightTimerBar.restoreActiveFlight(isReload)
+    local saved = ns.DB and ns.DB.activeFlight
+    if type(saved) ~= "table" then return false end
+    if pending then return true end
+    if not (UnitOnTaxi and UnitOnTaxi("player")) then return false end
+    local startEpoch = tonumber(saved.startEpoch)
+    local nowEpoch = time and time()
+    local elapsed = startEpoch and nowEpoch and (nowEpoch - startEpoch)
+    if not (elapsed and elapsed >= 0 and elapsed <= 3600 and type(saved.dest) == "string") then
+        InFlightTimerBar.clearActiveFlight()
+        return true
+    end
+    local now = GetTime()
+    pending = {
+        key = saved.key, dest = saved.dest, dist = tonumber(saved.dist), hops = tonumber(saved.hops),
+        hopFractions = type(saved.hopFractions) == "table" and saved.hopFractions or nil,
+        speedKey = saved.speedKey, speedMultiplier = tonumber(saved.speedMultiplier),
+        total = tonumber(saved.total), recorded = saved.recorded, earlyLanding = saved.earlyLanding,
+        noRecord = saved.noRecord or not isReload,
+        t0 = now, start = now - elapsed, restored = true,
+    }
+    -- already past the warning point: do not warn late
+    local total = pending.total
+    if resolveFiniteNumber(total) and total - elapsed <= InFlightTimerBar.soonSeconds() then pending.soonFired = true end
+    if not pending.key then pending.noRecord = true end
+    InFlightTimerBar.saveActiveFlight()
+    elapsedAcc = 0
+    watcher:Show()
+    InFlightTimerBar.displayFlightTimerBar()
+    return true
+end
+
+local restoreFrame = CreateFrame("Frame")
+restoreFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
+restoreFrame:SetScript("OnEvent", function(_, _, isInitialLogin, isReloadingUi)
+    if not (ns.DB and type(ns.DB.activeFlight) == "table") then return end
+    local isReload = isReloadingUi and not isInitialLogin
+    -- the taxi state can arrive a moment after the loading screen
+    local tries = 0
+    local function attempt()
+        tries = tries + 1
+        if InFlightTimerBar.restoreActiveFlight(isReload) then return end
+        if tries < 6 then
+            C_Timer.After(1, attempt)
+        elseif not pending then
+            InFlightTimerBar.clearActiveFlight()
+        end
+    end
+    attempt()
 end)
 
 if hooksecurefunc and TakeTaxiNode then
@@ -206,6 +340,7 @@ if hooksecurefunc and TakeTaxiNode then
             speedKey=ns.snap.speedKey, speedMultiplier=ns.snap.speedMultiplier,
             total = grandTotal, recorded = recorded, t0 = GetTime(),
         }
+        InFlightTimerBar.clearActiveFlight()
         elapsedAcc = 0
         watcher:Show()
     end)
@@ -213,7 +348,10 @@ end
 
 if hooksecurefunc and TaxiRequestEarlyLanding then
     hooksecurefunc("TaxiRequestEarlyLanding", function()
-        if pending then pending.earlyLanding = true end
+        if pending then
+            pending.earlyLanding = true
+            InFlightTimerBar.saveActiveFlight()
+        end
     end)
 end
 
