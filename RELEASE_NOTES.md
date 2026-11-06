@@ -1,15 +1,11 @@
-# v2.0.5
+# v2.0.6
 
 ### 한국어
-- 세계지도의 비행 조련사 표시에서 오류가 날 수 있던 문제를 수정했습니다.
-- 정식 서버에서 없어진 직항 경로를 비행 시간 계산에서 제외했습니다.
-- 비행 지도를 열 때 기본 창이 잠깐 보이던 문제를 수정했습니다.
-- 큰 지도에서 이름표 배치 속도를 개선했습니다.
-- 세계지도 버튼 정렬이 오류로 멈추지 않도록 개선했습니다.
+- 전투 중 세계 지도에서 나던 "애드온 동작 차단" 오류를 수정했습니다.
+- 이륙·착륙 감지를 개선했고, 쓰지 않는 비행 지점을 지도에서 뺐습니다.
+- 비행 중 자동으로 열린 미니게임 창을 닫으면 다음 비행부터 자동으로 열지 않습니다.
 
 ### English
-- Fixed possible errors on flight master pins on the world map.
-- Removed a direct flight path that no longer exists on the live realm from flight time estimates.
-- Fixed the default taxi window flashing when opening the flight map.
-- Faster label placement on large maps.
-- The world map button dock no longer stops working after an error.
+- Fixed blocked-action errors on the world map in combat.
+- Improved takeoff and landing detection; retired flight points are no longer shown.
+- Closing the mini games window that opened on a flight now stops it from opening on later flights.
