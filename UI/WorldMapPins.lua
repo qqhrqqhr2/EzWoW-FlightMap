@@ -16,6 +16,12 @@ local WorldMapPinProvider = ns.WorldMapPinProvider or {}
 ns.WorldMapPinProvider = WorldMapPinProvider
 local PIN = "EzWoWFlightMapPinTemplate"
 
+-- Faction of a taxi node (the game's own enum when the client has it)
+local FLIGHT_FACTION = Enum and Enum.FlightPathFaction or {}
+local FACTION_NEUTRAL = FLIGHT_FACTION.Neutral or 0
+local FACTION_HORDE = FLIGHT_FACTION.Horde or 1
+local FACTION_ALLIANCE = FLIGHT_FACTION.Alliance or 2
+
 local STYLE = ns.STYLE or {
     bgPrimary   = { 0.071, 0.094, 0.122, 0.96 },
     bgSecondary = { 0.114, 0.157, 0.192, 0.94 },
@@ -45,9 +51,9 @@ end
 
 function WorldMapPinProvider.resolveFactionInfo(factionID)
     local resolvedValue = WorldMapPinProvider.resolveText()
-    if factionID == 0 then return { resolvedValue.neutral, 1, 0.82, 0.2 } end
-    if factionID == 1 then return { resolvedValue.horde, 1, 0.2, 0.15 } end
-    if factionID == 2 then return { resolvedValue.alliance, 0.2, 0.6, 1 } end
+    if factionID == FACTION_NEUTRAL then return { resolvedValue.neutral, 1, 0.82, 0.2 } end
+    if factionID == FACTION_HORDE then return { resolvedValue.horde, 1, 0.2, 0.15 } end
+    if factionID == FACTION_ALLIANCE then return { resolvedValue.alliance, 0.2, 0.6, 1 } end
     return { resolvedValue.unknown, 0.7, 0.7, 0.7 }
 end
 
@@ -71,9 +77,13 @@ function WorldMapPinProvider.resolveFactionSettings()
     local filters = EzWoW_FlightMapDB.worldMapFactionFilters
     if type(filters[radioOptionGroup]) ~= "table" then filters[radioOptionGroup] = {} end
     local options = filters[radioOptionGroup]
-    local defaults = {[0] = true, [1] = radioOptionGroup == "Horde", [2] = radioOptionGroup == "Alliance"}
-    for entityID = 0, 2 do
-        if type(options[entityID]) ~= "boolean" then options[entityID] = defaults[entityID] end
+    local defaults = {
+        [FACTION_NEUTRAL] = true,
+        [FACTION_HORDE] = radioOptionGroup == "Horde",
+        [FACTION_ALLIANCE] = radioOptionGroup == "Alliance",
+    }
+    for entityID, defaultValue in pairs(defaults) do
+        if type(options[entityID]) ~= "boolean" then options[entityID] = defaultValue end
     end
     return options
 end
@@ -116,12 +126,15 @@ function WorldMapPinProvider.computeLabelBoundingRect(child, parent)
     end
 end
 
+-- Retired nodes ("zz" names) are left out. Maps where the game draws its own
+-- flight points are not skipped: while this feature is on the stock flight
+-- point pins are removed (see bindStock), so these pins replace them there.
 function WorldMapPinProvider.collectMatchingEntries(mapID)
     local result, visitedMap = {}, {}
     local function appendEntry(nodeList2, left, right, top, bottom)
         for _, n in ipairs(nodeList2) do
             if type(n) == "table" and type(n.name) == "string"
-                and not n.name:lower():match("^zzold")
+                and not n.name:lower():find("^zz")
                 and not WorldMapPinProvider.isTransportNode(n) then
                 local coordX, coordY = WorldMapPinProvider.normalizePointCoordinates(n.position)
                 if coordX and coordX >= 0 and coordX <= 1 and coordY >= 0 and coordY <= 1 then
@@ -159,6 +172,13 @@ function WorldMapPinProvider.collectMatchingEntries(mapID)
 end
 
 EzWoWFlightMapPinMixin = {}
+
+-- SetPassThroughButtons is blocked in combat; the map calls it when pins are acquired
+function EzWoWFlightMapPinMixin:SetPassThroughButtons(...)
+    if InCombatLockdown() then return end
+    getmetatable(self).__index.SetPassThroughButtons(self, ...)
+end
+
 function EzWoWFlightMapPinMixin:OnLoad()
     self:UseFrameLevelType("PIN_FRAME_LEVEL_FLIGHT_POINT")
     self:SetScalingLimits(1, 1, 1)
@@ -194,7 +214,7 @@ function EzWoWFlightMapPinMixin:OnMouseEnter()
     GameTooltip:SetText(n.name, 1, 0.82, 0)
     GameTooltip:AddLine(windowFrame[1], windowFrame[2], windowFrame[3], windowFrame[4])
     local player = UnitFactionGroup("player")
-    local enemy = (n.faction == 1 and player == "Alliance") or (n.faction == 2 and player == "Horde")
+    local enemy = (n.faction == FACTION_HORDE and player == "Alliance") or (n.faction == FACTION_ALLIANCE and player == "Horde")
     if enemy then
         GameTooltip:AddLine(resolvedValue.enemy, 1, 0.3, 0.25)
     elseif n.isUndiscovered == true then
@@ -397,7 +417,7 @@ function WorldMapPinProvider.buildMapToggle()
     end)
 
     local factionBtns = {}
-    local factionOrder = { 2, 1, 0 } 
+    local factionOrder = { FACTION_ALLIANCE, FACTION_HORDE, FACTION_NEUTRAL }
     local btnW = 76
     for entryIndex, fid in ipairs(factionOrder) do
         local WorldMapFilterButton = WorldMapPinProvider.constructSmallBtn(WorldMapFilterPopover, btnW, 20, "", function()
@@ -605,15 +625,29 @@ function ns.RefreshWorldMap()
     if _G.EzWoWWorldMapDock and _G.EzWoWWorldMapDock.Layout then
         _G.EzWoWWorldMapDock:Layout()
     end
-    if WorldMapDataProvider and WorldMapFrame:IsShown() then WorldMapFrame:RefreshAllDataProviders() end
+    if not (WorldMapDataProvider and WorldMapFrame:IsShown()) then return end
+    -- Refreshing every provider makes the stock pins run protected calls from
+    -- this addon, which is blocked in combat: only our pins now, the rest later.
+    if InCombatLockdown() then
+        WorldMapDataProvider:RefreshAllData()
+        WorldMapPinProvider.fullRefreshPending = true
+        return
+    end
+    WorldMapFrame:RefreshAllDataProviders()
 end
 
 local events = CreateFrame("Frame")
 events:RegisterEvent("ADDON_LOADED")
 events:RegisterEvent("PLAYER_LOGIN")
 events:RegisterEvent("UNIT_FACTION")
+events:RegisterEvent("PLAYER_REGEN_ENABLED")
 events:SetScript("OnEvent", function(_, event, name)
-    if event == "UNIT_FACTION" then
+    if event == "PLAYER_REGEN_ENABLED" then
+        if WorldMapPinProvider.fullRefreshPending then
+            WorldMapPinProvider.fullRefreshPending = false
+            ns.RefreshWorldMap()
+        end
+    elseif event == "UNIT_FACTION" then
         if name == "player" then ns.RefreshWorldMap() end
     elseif event == "PLAYER_LOGIN" or name == ADDON_NAME or name == "Blizzard_WorldMap" then
         WorldMapPinProvider.installWorldMapPinProvider()

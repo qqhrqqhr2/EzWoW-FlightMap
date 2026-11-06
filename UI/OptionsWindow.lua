@@ -699,7 +699,7 @@ SlashCmdList.EZWOWFLIGHTMAP = function(msg)
     else
         printAddonChatMessage(L.MSG_ENABLED:format(SettingsDialog.formatBooleanStateLabel(ns.DB.enabled)))
         for _, line in ipairs(L.HELP) do
-            DEFAULT_CHAT_FRAME:AddMessage("  " .. line)
+            ns.PrintRaw("  " .. line)
         end
     end
 end

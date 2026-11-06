@@ -12,7 +12,7 @@
 local ADDON_NAME, ns = ...
 local type, pairs, ipairs, tostring, pcall = type, pairs, ipairs, tostring, pcall
 
-local LIB_VERSION = 2
+local LIB_VERSION = 3
 local WINDOW_NAME = "EzWoWMiniGamesWindow"
 local previous = _G.EzWoW_MiniGames
 if type(previous) == "table" and (tonumber(previous.version) or 0) >= LIB_VERSION then return end
@@ -61,6 +61,7 @@ local STR = {
         win = "성공! %s", newBest = "새 최고 기록! %s", lose = "펑! 지뢰를 밟았습니다. 새 게임을 눌러 보세요.",
         best = "최고 기록: %s", noBest = "최고 기록 없음",
         autoOpen = "비행을 시작하면 자동으로 열기",
+        autoOff = "비행할 때 미니게임 창을 자동으로 열지 않습니다. 다시 켜려면 /미니게임 창 아래의 '비행을 시작하면 자동으로 열기'를 선택하세요.",
         h_mines = "왼쪽 클릭: 열기 · 오른쪽 클릭: 깃발 · 숫자 클릭: 주변 열기",
         h_memory = "같은 그림 두 장을 찾으세요.",
         h_puzzle = "빈칸과 같은 줄의 조각을 누르면 밀립니다. 1부터 순서대로 맞추세요.",
@@ -76,6 +77,7 @@ local STR = {
         win = "Solved! %s", newBest = "New best! %s", lose = "Boom! Press New game to try again.",
         best = "Best: %s", noBest = "No record yet",
         autoOpen = "Open when a flight starts",
+        autoOff = "The mini games window will no longer open on flights. To turn it back on, tick 'Open when a flight starts' at the bottom of /ezgames.",
         h_mines = "Left-click: open · Right-click: flag · Click a number: open around it",
         h_memory = "Find the pairs of matching pictures.",
         h_puzzle = "Click a tile in line with the gap to slide it. Put 1 to the end in order.",
@@ -652,6 +654,19 @@ local function build()
     win:SetScript("OnHide", function()
         -- the clock stops while the window is closed; the board is kept
         saveAll()
+        -- the player closed the window that opened by itself on this flight:
+        -- stop opening it on later flights (the checkbox turns it back on)
+        if MiniGames.autoOpened and not MiniGames.addonHiding
+            and UnitOnTaxi and UnitOnTaxi("player") then
+            local g = store()
+            if g and g.autoOpen ~= false then
+                g.autoOpen = false
+                if DEFAULT_CHAT_FRAME then
+                    DEFAULT_CHAT_FRAME:AddMessage("|cff33ff99" .. T("title") .. "|r: " .. T("autoOff"))
+                end
+            end
+        end
+        MiniGames.autoOpened = false
     end)
     win:Hide()
 end
@@ -666,8 +681,17 @@ function MiniGames.Toggle()
     if win and win:IsShown() then win:Hide() else MiniGames.Open() end
 end
 
+-- hides done by the addon itself (landing, another copy taking over) are not
+-- the player closing the window
+local function addonHide()
+    if not (win and win:IsShown()) then return end
+    MiniGames.addonHiding = true
+    pcall(win.Hide, win)
+    MiniGames.addonHiding = false
+end
+
 function MiniGames.Close()
-    if win and win:IsShown() then win:Hide() end
+    addonHide()
 end
 
 function MiniGames.ExtraButton() return win and win.extra end
@@ -687,9 +711,13 @@ local function checkTaxi()
     if onTaxi == wasOnTaxi then return false end
     if onTaxi then
         local g = store()
-        if g and g.autoOpen ~= false then MiniGames.Open() end
+        if g and g.autoOpen ~= false and not (win and win:IsShown()) then
+            MiniGames.Open()
+            MiniGames.autoOpened = true
+        end
     else
-        if win and win:IsShown() and not MiniGames.IsPlaying() then win:Hide() end
+        MiniGames.autoOpened = false
+        if win and win:IsShown() and not MiniGames.IsPlaying() then addonHide() end
     end
     wasOnTaxi = onTaxi
     return true

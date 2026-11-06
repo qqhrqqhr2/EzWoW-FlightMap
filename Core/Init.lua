@@ -171,11 +171,53 @@ end
 -----------------------------------------------------------------------------
 -- Print
 -----------------------------------------------------------------------------
-function ns.Print(text)
+-- Chat lines are held during combat and printed when it ends: adding our
+-- text to the chat history in combat can taint it.
+local deferredChatLines = {}
+local MAX_DEFERRED_CHAT_LINES = 30
+
+function CoreConfig.isPlayerInCombat()
+    if InCombatLockdown and InCombatLockdown() then return true end
+    if UnitAffectingCombat then
+        local isCallOk, inCombat = pcall(UnitAffectingCombat, "player")
+        if isCallOk and inCombat and not (issecretvalue and issecretvalue(inCombat)) then return true end
+    end
+    return false
+end
+
+function CoreConfig.writeChatLine(line)
     if DEFAULT_CHAT_FRAME and DEFAULT_CHAT_FRAME.AddMessage then
-        DEFAULT_CHAT_FRAME:AddMessage("|cff85B9FFEzWoW - Flight Map|r: " .. tostring(text))
+        DEFAULT_CHAT_FRAME:AddMessage(line)
     end
 end
+
+function CoreConfig.emitChatLine(line)
+    if CoreConfig.isPlayerInCombat() then
+        if #deferredChatLines < MAX_DEFERRED_CHAT_LINES then
+            deferredChatLines[#deferredChatLines + 1] = line
+        end
+        return
+    end
+    CoreConfig.writeChatLine(line)
+end
+
+function ns.Print(text)
+    CoreConfig.emitChatLine("|cff85B9FFEzWoW - Flight Map|r: " .. tostring(text))
+end
+
+-- a line without the addon prefix (help listings)
+function ns.PrintRaw(text)
+    CoreConfig.emitChatLine(tostring(text))
+end
+
+local chatFlushFrame = CreateFrame("Frame")
+pcall(chatFlushFrame.RegisterEvent, chatFlushFrame, "PLAYER_REGEN_ENABLED")
+chatFlushFrame:SetScript("OnEvent", function()
+    if #deferredChatLines == 0 then return end
+    local lines = deferredChatLines
+    deferredChatLines = {}
+    for _, line in ipairs(lines) do CoreConfig.writeChatLine(line) end
+end)
 
 function ns.ExtractShortStationName(name)
     return (name and name:match("^([^,]+)")) or name or "?"

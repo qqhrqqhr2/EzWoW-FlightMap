@@ -215,12 +215,71 @@ function InFlightTimerBar.triggerArrivalNotification()
     if FlashClientIcon then pcall(FlashClientIcon) end
 end
 
+-- Takeoff and landing come from events; the watcher refreshes the bar and,
+-- a few times a second, checks the taxi state as a safety net.
+local TAKEOFF_WINDOW = 5      -- seconds after the click in which losing control means takeoff
+local TAKEOFF_TIMEOUT = 15    -- a click with no takeoff by then is dropped
+local NOT_ON_TAXI_GRACE = 3   -- started but never on the taxi by then: not a flight (e.g. a stun)
+local TICK = 0.2
+
 local watcher = CreateFrame("Frame")
 watcher:Hide()
 local elapsedAcc = 0
+
+function InFlightTimerBar.endTracking()
+    pending = nil
+    InFlightTimerBar.clearActiveFlight()
+    InFlightTimerBar.concealFlightTimerBar()
+    watcher:Hide()
+end
+
+function InFlightTimerBar.startFlight(now)
+    if not pending or pending.start then return end
+    pending.start = now
+    InFlightTimerBar.saveActiveFlight()
+    InFlightTimerBar.displayFlightTimerBar()
+end
+
+function InFlightTimerBar.finishFlight(now)
+    if not (pending and pending.start) then return end
+    -- never seen on the taxi: the click was refused and something else took control
+    if not pending.seenOnTaxi then
+        InFlightTimerBar.endTracking()
+        return
+    end
+    local dur = now - pending.start
+    -- a flight picked up again after a fresh login may include time spent
+    -- offline, so it is not used as a recorded time
+    local arrived = not pending.earlyLanding
+    if pending.noRecord then
+        if arrived then InFlightTimerBar.triggerArrivalNotification() end
+        arrived = false
+    end
+    if arrived and dur >= 5 and dur <= 3600 and ns.DB then
+        local updatedVal = floor(dur + 0.5)
+        local previousVal = ns.DB.times[pending.key]
+        ns.DB.times[pending.key] = updatedVal
+        if pending.dist and pending.dist > 0 then
+            local measured = pending.dist / dur / (pending.speedMultiplier or 1)
+            local previous = ns.DB.flightSpeeds[pending.speedKey]
+            if not resolveFiniteNumber(previous) or previous < 8 or previous > 120 then previous = nil end
+            if measured >= 8 and measured <= 120 and
+                (not resolveFiniteNumber(previous) or (measured >= previous * .75 and measured <= previous * 1.33)) then
+                ns.DB.flightSpeeds[pending.speedKey] = resolveFiniteNumber(previous) and
+                    (previous * .75 + measured * .25) or measured
+            end
+        end
+        if not previousVal or abs(previousVal - updatedVal) >= 3 then
+            printAddonChatMessage(L.MSG_RECORDED:format(shortName(pending.dest), composeTime(dur)))
+        end
+        InFlightTimerBar.triggerArrivalNotification()
+    end
+    InFlightTimerBar.endTracking()
+end
+
 watcher:SetScript("OnUpdate", function(self, elapsed)
     elapsedAcc = elapsedAcc + (elapsed or 0)
-    if elapsedAcc < 0.1 then return end
+    if elapsedAcc < TICK then return end
     elapsedAcc = 0
     if not pending then
         InFlightTimerBar.concealFlightTimerBar()
@@ -229,50 +288,42 @@ watcher:SetScript("OnUpdate", function(self, elapsed)
     end
     local now = GetTime()
     local isPlayerInFlight = UnitOnTaxi("player")
+    if isPlayerInFlight then pending.seenOnTaxi = true end
     if not pending.start then
+        -- fallback when the control-lost event did not come
         if isPlayerInFlight then
-            pending.start = now
-            InFlightTimerBar.saveActiveFlight()
-            InFlightTimerBar.displayFlightTimerBar()
-        elseif now - pending.t0 > 15 then
+            InFlightTimerBar.startFlight(now)
+        elseif now - pending.t0 > TAKEOFF_TIMEOUT then
             pending = nil
             self:Hide()
         end
     elseif isPlayerInFlight then
         InFlightTimerBar.refreshFlightTimerBar(now)
         InFlightTimerBar.checkArrivingSoon(now)
+    elseif pending.seenOnTaxi or now - pending.start > NOT_ON_TAXI_GRACE then
+        -- UnitOnTaxi is still false for a moment after takeoff
+        InFlightTimerBar.finishFlight(now)
     else
-        local dur = now - pending.start
-        -- a flight picked up again after a fresh login may include time spent
-        -- offline, so it is not used as a recorded time
-        local arrived = not pending.earlyLanding
-        if pending.noRecord then
-            if arrived then InFlightTimerBar.triggerArrivalNotification() end
-            arrived = false
+        InFlightTimerBar.refreshFlightTimerBar(now)
+    end
+end)
+
+-- Losing control right after a flight-map click is the takeoff (UnitOnTaxi
+-- is still false at that moment); regaining it off the taxi is the landing.
+local controlFrame = CreateFrame("Frame")
+pcall(controlFrame.RegisterEvent, controlFrame, "PLAYER_CONTROL_LOST")
+pcall(controlFrame.RegisterEvent, controlFrame, "PLAYER_CONTROL_GAINED")
+controlFrame:SetScript("OnEvent", function(_, event)
+    if not pending then return end
+    local now = GetTime()
+    if event == "PLAYER_CONTROL_LOST" then
+        if not pending.start and now - pending.t0 < TAKEOFF_WINDOW then
+            InFlightTimerBar.startFlight(now)
         end
-        if arrived and dur >= 5 and dur <= 3600 and ns.DB then
-            local updatedVal = floor(dur + 0.5)
-            local previousVal = ns.DB.times[pending.key]
-            ns.DB.times[pending.key] = updatedVal
-            if pending.dist and pending.dist > 0 then
-                local measured = pending.dist / dur / (pending.speedMultiplier or 1)
-                local previous = ns.DB.flightSpeeds[pending.speedKey]
-                if not resolveFiniteNumber(previous) or previous < 8 or previous > 120 then previous = nil end
-                if measured >= 8 and measured <= 120 and
-                    (not resolveFiniteNumber(previous) or (measured >= previous * .75 and measured <= previous * 1.33)) then
-                    ns.DB.flightSpeeds[pending.speedKey] = resolveFiniteNumber(previous) and
-                        (previous * .75 + measured * .25) or measured
-                end
-            end
-            if not previousVal or abs(previousVal - updatedVal) >= 3 then
-                printAddonChatMessage(L.MSG_RECORDED:format(shortName(pending.dest), composeTime(dur)))
-            end
-            InFlightTimerBar.triggerArrivalNotification()
+    elseif event == "PLAYER_CONTROL_GAINED" then
+        if pending.start and not UnitOnTaxi("player") then
+            InFlightTimerBar.finishFlight(now)
         end
-        pending = nil
-        InFlightTimerBar.clearActiveFlight()
-        InFlightTimerBar.concealFlightTimerBar()
-        self:Hide()
     end
 end)
 
@@ -296,7 +347,7 @@ function InFlightTimerBar.restoreActiveFlight(isReload)
         speedKey = saved.speedKey, speedMultiplier = tonumber(saved.speedMultiplier),
         total = tonumber(saved.total), recorded = saved.recorded, earlyLanding = saved.earlyLanding,
         noRecord = saved.noRecord or not isReload,
-        t0 = now, start = now - elapsed, restored = true,
+        t0 = now, start = now - elapsed, restored = true, seenOnTaxi = true,
     }
     -- already past the warning point: do not warn late
     local total = pending.total
