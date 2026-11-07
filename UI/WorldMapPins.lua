@@ -571,8 +571,30 @@ function WorldMapPinProvider.buildMapToggle()
     WorldMapPinProvider.syncToggle()
 end
 
+-- Our map layer runs from post-hooks on the map instead of being registered
+-- as a map data provider: a provider runs inside the map's own update loop,
+-- and the game's pins made after it in that loop are then blocked in combat
+-- (SetPassThroughButtons). The layer keeps the provider method names.
+local function attachMapLayer(map, layer)
+    layer.owningMap = map
+    layer.GetMap = function() return map end
+    local function run(method, ...)
+        local fn = layer[method]
+        if type(fn) == "function" then fn(layer, ...) end
+    end
+    hooksecurefunc(map, "OnMapChanged", function() run("OnMapChanged") end)
+    for _, method in ipairs({ "OnCanvasScaleChanged", "OnCanvasSizeChanged", "SetGlobalAlpha" }) do
+        if type(map[method]) == "function" then
+            local target = method == "SetGlobalAlpha" and "OnGlobalAlphaChanged" or method
+            hooksecurefunc(map, method, function() run(target) end)
+        end
+    end
+    map:HookScript("OnShow", function() run("OnShow"); run("RefreshAllData", true) end)
+    map:HookScript("OnHide", function() run("OnHide") end)
+end
+
 function WorldMapPinProvider.installWorldMapPinProvider()
-    if WorldMapDataProvider or not (WorldMapFrame and WorldMapFrame.AddDataProvider
+    if WorldMapDataProvider or not (WorldMapFrame and WorldMapFrame.OnMapChanged
         and MapCanvasDataProviderMixin and MapCanvasPinMixin
         and C_TaxiMap and C_TaxiMap.GetTaxiNodesForMap) then return end
     for lookupKey, value in pairs(MapCanvasPinMixin) do
@@ -592,13 +614,14 @@ function WorldMapPinProvider.installWorldMapPinProvider()
             end
         end
     end
+    local taxiEvents = CreateFrame("Frame")
+    taxiEvents:SetScript("OnEvent", function() WorldMapDataProvider:RefreshAllData() end)
     function WorldMapDataProvider:OnShow()
-        self:RegisterEvent("TAXI_NODE_STATUS_CHANGED")
+        pcall(taxiEvents.RegisterEvent, taxiEvents, "TAXI_NODE_STATUS_CHANGED")
         WorldMapPinProvider.syncToggle()
     end
-    function WorldMapDataProvider:OnHide() self:UnregisterEvent("TAXI_NODE_STATUS_CHANGED") end
-    function WorldMapDataProvider:OnEvent() self:RefreshAllData() end
-    WorldMapFrame:AddDataProvider(WorldMapDataProvider)
+    function WorldMapDataProvider:OnHide() taxiEvents:UnregisterAllEvents() end
+    attachMapLayer(WorldMapFrame, WorldMapDataProvider)
     local function bindStock(_, stock)
         if not (FlightPointDataProviderMixin and stock ~= WorldMapDataProvider
             and stock.ShouldShowTaxiNode == FlightPointDataProviderMixin.ShouldShowTaxiNode)
@@ -635,6 +658,8 @@ function ns.RefreshWorldMap()
         return
     end
     WorldMapFrame:RefreshAllDataProviders()
+    -- our layer is not one of the map's providers: refresh it on its own
+    WorldMapDataProvider:RefreshAllData()
 end
 
 local events = CreateFrame("Frame")

@@ -10,7 +10,7 @@ local tsort = table.sort
 local WorldMapDockManager = ns.WorldMapDockManager or {}
 ns.WorldMapDockManager = WorldMapDockManager
 
-local DOCK_PROTOCOL_VERSION = 5
+local DOCK_PROTOCOL_VERSION = 6
 local DOCK_SLOT_PRIORITY = {
     EzWoW_MapFinder         = 1,
     EzWoW_FlightMap         = 2,
@@ -174,26 +174,13 @@ if type(DockCoordinator) ~= "table" or (DockCoordinator.version or 0) < DOCK_PRO
         self:EnsureMapProvider()
     end
 
-    -- Map changes arrive through a map data provider (the map's own extension
-    -- point) instead of a post-hook on the map's OnMapChanged method, which
-    -- runs our code inside the map's update. Older copies of this file may
-    -- already have installed that hook; it can't be removed, but this one
-    -- never adds it again.
+    -- Map changes arrive through a post-hook on the map's OnMapChanged method.
+    -- A map data provider would run inside the map's own update loop, and the
+    -- game's pins made after it in that loop are then blocked in combat.
     function DockCoordinator:EnsureMapProvider()
-        if self.mapProviderInstalled or not WorldMapFrame then return end
-        if not (WorldMapFrame.AddDataProvider and MapCanvasDataProviderMixin and CreateFromMixins) then
-            if not self.hooksMapChanged and WorldMapFrame.OnMapChanged then
-                self.hooksMapChanged = true
-                hooksecurefunc(WorldMapFrame, "OnMapChanged", function() self:Layout() end)
-            end
-            return
-        end
-        self.mapProviderInstalled = true
-        local provider = CreateFromMixins(MapCanvasDataProviderMixin)
-        provider.RemoveAllData = function() end
-        provider.RefreshAllData = function() end
-        provider.OnMapChanged = function() self:Layout() end
-        WorldMapFrame:AddDataProvider(provider)
+        if self.hooksMapChanged or not (WorldMapFrame and WorldMapFrame.OnMapChanged) then return end
+        self.hooksMapChanged = true
+        hooksecurefunc(WorldMapFrame, "OnMapChanged", function() self:Layout() end)
     end
 
     function DockCoordinator:Register(addonId, spec)
