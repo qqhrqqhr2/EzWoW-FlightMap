@@ -92,6 +92,7 @@ ns.defaults = {
     crop              = false,
     showUnreachable   = true,
     labels            = true,
+    labelCompact      = true,   -- one line per destination: name and time
     labelSize         = 12,
     scale             = 1.0,
     alpha             = 1.0,

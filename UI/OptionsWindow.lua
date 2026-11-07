@@ -130,6 +130,7 @@ local SETTINGS = {
     { kind = "check",  key = "worldMapFlights",   label = "OPT_WORLDMAP" },
     { kind = "check",  key = "worldMapAutoAlign", label = "OPT_AUTOALIGN" },
     { kind = "check",  key = "labels",            label = "OPT_LABELS" },
+    { kind = "check",  key = "labelCompact",      label = "OPT_LABEL_COMPACT" },
     { kind = "check",  key = "crop",              label = "OPT_CROP" },
     { kind = "check",  key = "showUnreachable",   label = "OPT_ALL" },
     { kind = "check",  key = "showList",          label = "OPT_LIST", sub = "OPT_LIST_SUB" },
@@ -150,6 +151,7 @@ function SettingsDialog.resolveOpt(key)
     if key == "scale" then return floor(ns.DB.scale * 100 + 0.5) end
     if key == "alpha" then return floor((1 - ns.DB.alpha) * 100 + 0.5) end
     if key == "labelSize" then return ns.DB.labelSize end
+    if key == "labelCompact" then return ns.DB.labelCompact ~= false end
     return ns.DB[key] and true or false
 end
 

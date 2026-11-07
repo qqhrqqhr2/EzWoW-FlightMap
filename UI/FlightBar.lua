@@ -38,7 +38,7 @@ function InFlightTimerBar.saveActiveFlight()
         key = pending.key, dest = pending.dest, dist = pending.dist, hops = pending.hops,
         hopFractions = pending.hopFractions, speedKey = pending.speedKey,
         speedMultiplier = pending.speedMultiplier, total = pending.total, recorded = pending.recorded,
-        earlyLanding = pending.earlyLanding, noRecord = pending.noRecord,
+        earlyLanding = pending.earlyLanding, noRecord = pending.noRecord, special = pending.special,
         startEpoch = nowEpoch - (GetTime() - pending.start),
     }
 end
@@ -248,6 +248,10 @@ function InFlightTimerBar.finishFlight(now)
         return
     end
     local dur = now - pending.start
+    if pending.special then
+        InFlightTimerBar.finishSpecialFlight(dur)
+        return
+    end
     -- a flight picked up again after a fresh login may include time spent
     -- offline, so it is not used as a recorded time
     local arrived = not pending.earlyLanding
@@ -272,6 +276,66 @@ function InFlightTimerBar.finishFlight(now)
         if not previousVal or abs(previousVal - updatedVal) >= 3 then
             printAddonChatMessage(L.MSG_RECORDED:format(shortName(pending.dest), composeTime(dur)))
         end
+        InFlightTimerBar.triggerArrivalNotification()
+    end
+    InFlightTimerBar.endTracking()
+end
+
+-----------------------------------------------------------------------------
+-- Flights that don't start from the flight map (a flight master's gossip,
+-- e.g. the free flights out of Moonglade): the bar shows the time flown; once
+-- such a flight has landed, its time and destination are kept for that
+-- starting place and shown from then on.
+-----------------------------------------------------------------------------
+local function playerSpot()
+    if not (C_Map and C_Map.GetBestMapForUnit and C_Map.GetPlayerMapPosition) then return nil end
+    local okMap, mapID = pcall(C_Map.GetBestMapForUnit, "player")
+    if not okMap or type(mapID) ~= "number" or (issecretvalue and issecretvalue(mapID)) then return nil end
+    local okPos, pos = pcall(C_Map.GetPlayerMapPosition, mapID, "player")
+    if not okPos or not pos then return nil end
+    local x, y = pos.x, pos.y
+    if type(x) ~= "number" or type(y) ~= "number" or (issecretvalue and (issecretvalue(x) or issecretvalue(y))) then return nil end
+    return mapID, x, y
+end
+
+local function landingName()
+    local name
+    if C_Map and C_Map.GetBestMapForUnit and C_Map.GetMapInfo then
+        local ok, mapID = pcall(C_Map.GetBestMapForUnit, "player")
+        local info = ok and type(mapID) == "number" and C_Map.GetMapInfo(mapID)
+        name = info and info.name
+    end
+    if (type(name) ~= "string" or name == "") and GetZoneText then name = GetZoneText() end
+    if type(name) ~= "string" or name == "" or (issecretvalue and issecretvalue(name)) then return nil end
+    return name
+end
+
+function InFlightTimerBar.startSpecialFlight(now)
+    if pending or not (ns.DB and UnitOnTaxi and UnitOnTaxi("player")) then return end
+    local mapID, x, y = playerSpot()
+    -- the starting place, rounded to a few yards' worth of the map
+    local key = mapID and string.format("%d:%d:%d", mapID, floor(x * 50 + 0.5), floor(y * 50 + 0.5)) or nil
+    if type(ns.DB.specialFlights) ~= "table" then ns.DB.specialFlights = {} end
+    local known = key and ns.DB.specialFlights[key]
+    pending = {
+        special = true, key = key, t0 = now, start = now, seenOnTaxi = true,
+        dest = (type(known) == "table" and known.dest) or L.BAR_FLYING,
+        total = type(known) == "table" and tonumber(known.time) or nil,
+        recorded = type(known) == "table" and true or nil,
+    }
+    InFlightTimerBar.saveActiveFlight()
+    elapsedAcc = 0
+    watcher:Show()
+    InFlightTimerBar.displayFlightTimerBar()
+end
+
+function InFlightTimerBar.finishSpecialFlight(dur)
+    local key, arrived = pending.key, not pending.earlyLanding and not pending.noRecord
+    if arrived and key and dur >= 5 and dur <= 3600 and ns.DB then
+        if type(ns.DB.specialFlights) ~= "table" then ns.DB.specialFlights = {} end
+        local dest = landingName() or pending.dest
+        ns.DB.specialFlights[key] = { time = floor(dur + 0.5), dest = dest }
+        printAddonChatMessage(L.MSG_RECORDED:format(shortName(dest), composeTime(dur)))
         InFlightTimerBar.triggerArrivalNotification()
     end
     InFlightTimerBar.endTracking()
@@ -314,7 +378,23 @@ local controlFrame = CreateFrame("Frame")
 pcall(controlFrame.RegisterEvent, controlFrame, "PLAYER_CONTROL_LOST")
 pcall(controlFrame.RegisterEvent, controlFrame, "PLAYER_CONTROL_GAINED")
 controlFrame:SetScript("OnEvent", function(_, event)
-    if not pending then return end
+    if not pending then
+        -- no flight-map click before: maybe a flight started from a gossip
+        if event == "PLAYER_CONTROL_LOST" and C_Timer and UnitOnTaxi then
+            local tries = 0
+            local function check()
+                tries = tries + 1
+                if pending then return end
+                if UnitOnTaxi("player") then
+                    InFlightTimerBar.startSpecialFlight(GetTime())
+                elseif tries < 10 then
+                    C_Timer.After(0.5, check)
+                end
+            end
+            C_Timer.After(0.3, check)
+        end
+        return
+    end
     local now = GetTime()
     if event == "PLAYER_CONTROL_LOST" then
         if not pending.start and now - pending.t0 < TAKEOFF_WINDOW then
@@ -346,13 +426,13 @@ function InFlightTimerBar.restoreActiveFlight(isReload)
         hopFractions = type(saved.hopFractions) == "table" and saved.hopFractions or nil,
         speedKey = saved.speedKey, speedMultiplier = tonumber(saved.speedMultiplier),
         total = tonumber(saved.total), recorded = saved.recorded, earlyLanding = saved.earlyLanding,
-        noRecord = saved.noRecord or not isReload,
+        noRecord = saved.noRecord or not isReload, special = saved.special,
         t0 = now, start = now - elapsed, restored = true, seenOnTaxi = true,
     }
     -- already past the warning point: do not warn late
     local total = pending.total
     if resolveFiniteNumber(total) and total - elapsed <= InFlightTimerBar.soonSeconds() then pending.soonFired = true end
-    if not pending.key then pending.noRecord = true end
+    if not pending.key and not pending.special then pending.noRecord = true end
     InFlightTimerBar.saveActiveFlight()
     elapsedAcc = 0
     watcher:Show()
@@ -363,7 +443,17 @@ end
 local restoreFrame = CreateFrame("Frame")
 restoreFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
 restoreFrame:SetScript("OnEvent", function(_, _, isInitialLogin, isReloadingUi)
-    if not (ns.DB and type(ns.DB.activeFlight) == "table") then return end
+    if not (ns.DB and type(ns.DB.activeFlight) == "table") then
+        if C_Timer and UnitOnTaxi then
+            C_Timer.After(1, function()
+                if pending or not UnitOnTaxi("player") then return end
+                InFlightTimerBar.startSpecialFlight(GetTime())
+                -- started somewhere along the way: not a time to keep
+                if pending then pending.noRecord = true; pending.key = nil end
+            end)
+        end
+        return
+    end
     local isReload = isReloadingUi and not isInitialLogin
     -- the taxi state can arrive a moment after the loading screen
     local tries = 0

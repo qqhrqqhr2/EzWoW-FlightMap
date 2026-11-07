@@ -226,6 +226,8 @@ function FlightMapWindow.styleLabel(lb, selected)
     lb.info:SetTextColor(selected and 1 or STYLE.textBody[1], selected and 0.98 or STYLE.textBody[2], selected and 1 or STYLE.textBody[3])
     if lb.region then lb.region:SetTextColor(selected and 0.90 or STYLE.textMuted[1], selected and 0.94 or STYLE.textMuted[2], selected and 1 or STYLE.textMuted[3]) end
     lb.accent:SetWidth(selected and 4 or 2)
+    -- the hovered label over the ones it overlaps
+    if labelOverlayLayer then lb.frame:SetFrameLevel(labelOverlayLayer:GetFrameLevel() + (selected and 40 or 1)) end
     if selected then
         lb.frame:SetBackdropColor(STYLE.bgSecondary[1], STYLE.bgSecondary[2], STYLE.bgSecondary[3], 0.98)
         lb.frame:SetBackdropBorderColor(STYLE.accent[1], STYLE.accent[2], STYLE.accent[3], 1)
@@ -624,7 +626,7 @@ end
 
 syncFareLabel = function(pinFrame)
     local lb = pinFrame.label
-    if not lb or not lb.node then return end
+    if not lb or not lb.node or lb.compact then return end
     lb.info:SetText(FlightMapWindow.resolveDestinationInfo(lb.node, lb.fontSize or ns.DB.labelSize or 12))
 end
 
@@ -654,9 +656,11 @@ function FlightMapWindow.layoutNonOverlappingLabels(shown)
     local size=ns.DB.labelSize or 12
     while size>8 and #shown*(size*16+16)*(size*3+10)>vwVal*vhVal*.55 do size=size-1 end
     
+    -- one-line labels: name and time only (cost and zone on hover), set right next to the pin
+    local compact=ns.DB.labelCompact~=false
     local keepOut={}
     for i,other in ipairs(shown) do
-        local radius=other.r+14
+        local radius=other.r+(compact and 5 or 14)
         keepOut[i]={other.px-radius,other.py-radius,other.px+radius,other.py+radius}
     end
     local nKeep=#keepOut
@@ -670,11 +674,23 @@ function FlightMapWindow.layoutNonOverlappingLabels(shown)
         assignFontSize(lb.name,size);assignFontSize(lb.region,max(8,size-2));assignFontSize(lb.info,size)
         local destination,region=FlightMapWindow.splitDestinationName(node.name)
         if FlightMapWindow.hasFavorite(node) then destination=STAR_INLINE..destination end
-        lb.name:SetText(destination);lb.region:SetText(region);lb.info:SetText(FlightMapWindow.resolveDestinationInfo(node,size))
+        if compact then
+            local extra=""
+            if node.type=="CURRENT" then
+                extra="  |cff8cffa6"..L.CURRENT.."|r"
+            elseif node.type=="REACHABLE" then
+                local sec,recorded=estimateFlightDuration(node)
+                if sec then extra="  |cffd9dbe0"..composeTime(sec,not recorded).."|r" end
+            end
+            lb.name:SetText(destination..extra);lb.region:SetText("");lb.info:SetText("")
+        else
+            lb.name:SetText(destination);lb.region:SetText(region);lb.info:SetText(FlightMapWindow.resolveDestinationInfo(node,size))
+        end
+        lb.compact=compact
         for _,labelRegion in ipairs({lb.name,lb.region,lb.info}) do labelRegion:SetWidth(0) end
-        local boxWidth=min(max(lb.name:GetStringWidth(),lb.region:GetStringWidth(),lb.info:GetStringWidth())+16,vwVal*.42)
-        local headerBar=size*3+10
-        local pxVal,pyVal,rowEntry=item.px,item.py,item.r+16
+        local boxWidth=min(max(lb.name:GetStringWidth(),lb.region:GetStringWidth(),lb.info:GetStringWidth())+(compact and 12 or 16),vwVal*.42)
+        local headerBar=compact and (size+8) or (size*3+10)
+        local pxVal,pyVal,rowEntry=item.px,item.py,item.r+(compact and 5 or 16)
         local maxX,maxY=max(0,vwVal-boxWidth),max(0,vhVal-headerBar)
         local bestX,bestY,bestScore,bestOverlap
         local function consider(coordX,coordY)
@@ -701,10 +717,14 @@ function FlightMapWindow.layoutNonOverlappingLabels(shown)
             if not bestScore or score<bestScore then bestX,bestY,bestScore,bestOverlap=coordX,coordY,score,overlap end
         end
         
-        for _,dyVal in ipairs({0,-headerBar-4,headerBar+4,-2*(headerBar+4),2*(headerBar+4)}) do
+        if compact then
+            -- centred under the pin; overlapping is fine, the hovered one comes to the front
+            bestX=max(0,min(maxX,pxVal-boxWidth/2));bestY=max(0,min(maxY,pyVal+item.r+2));bestOverlap=0
+        end
+        for _,dyVal in ipairs(compact and {} or {0,-headerBar-4,headerBar+4,-2*(headerBar+4),2*(headerBar+4)}) do
             consider(pxVal+rowEntry,pyVal-headerBar/2+dyVal);consider(pxVal-rowEntry-boxWidth,pyVal-headerBar/2+dyVal)
         end
-        consider(pxVal-boxWidth/2,pyVal-rowEntry-headerBar);consider(pxVal-boxWidth/2,pyVal+rowEntry)
+        if not compact then consider(pxVal-boxWidth/2,pyVal-rowEntry-headerBar);consider(pxVal-boxWidth/2,pyVal+rowEntry) end
         
         if not bestX or bestOverlap>0 then
             local x0Val,x1Val=max(0,pxVal-boxWidth-200),min(maxX,pxVal+200)
@@ -741,10 +761,15 @@ function FlightMapWindow.layoutNonOverlappingLabels(shown)
                 if labelRegion.SetMaxLines then labelRegion:SetMaxLines(1) end
                 labelRegion:ClearAllPoints()
             end
-            lb.name:SetPoint("TOPLEFT",lb.frame,"TOPLEFT",8,-4)
-            lb.region:SetPoint("TOPLEFT",lb.frame,"TOPLEFT",8,-(size+6))
-            lb.info:SetPoint("TOPLEFT",lb.frame,"TOPLEFT",8,-(size*2+7))
-            if lb.leader then
+            if compact then
+                lb.name:SetWidth(boxWidth-10)
+                lb.name:SetPoint("LEFT",lb.frame,"LEFT",7,0)
+            else
+                lb.name:SetPoint("TOPLEFT",lb.frame,"TOPLEFT",8,-4)
+                lb.region:SetPoint("TOPLEFT",lb.frame,"TOPLEFT",8,-(size+6))
+                lb.info:SetPoint("TOPLEFT",lb.frame,"TOPLEFT",8,-(size*2+7))
+            end
+            if lb.leader and not compact then
                 local exVal,eyVal=min(max(pxVal,bestX),bestX+boxWidth),min(max(pyVal,bestY),bestY+headerBar)
                 local dxVal,dyVal=exVal-pxVal,eyVal-pyVal
                 local distance=sqrt(dxVal*dxVal+dyVal*dyVal)
@@ -753,7 +778,8 @@ function FlightMapWindow.layoutNonOverlappingLabels(shown)
                     lb.leader:SetEndPoint("TOPLEFT",canvasViewport,exVal,-eyVal);lb.leader:Show()
                 end
             end
-            FlightMapWindow.styleLabel(lb,false);lb.region:Show();lb.info:Show();lb.frame:Show()
+            FlightMapWindow.styleLabel(lb,false)
+            lb.region:SetShown(not compact);lb.info:SetShown(not compact);lb.frame:Show()
         else
 
             FlightMapWindow.dismissLabel(lb)

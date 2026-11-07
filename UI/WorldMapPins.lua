@@ -221,8 +221,9 @@ function EzWoWFlightMapPinMixin:OnMouseEnter()
         GameTooltip:AddLine(resolvedValue.undiscovered, 0.8, 0.8, 0.8)
     end
     GameTooltip:AddLine(resolvedValue.visit, 0.8, 0.8, 0.8, true)
-    GameTooltip:AddLine(resolvedValue.title, STYLE.accent[1], STYLE.accent[2], STYLE.accent[3])
+    GameTooltip:AddDoubleLine(" ", "EzWoW - Flight Map", 0, 0, 0, 0.5, 0.5, 0.5)
     GameTooltip:Show()
+    if _G.EzWoWTooltipTagSizer and _G.EzWoWTooltipTagSizer.Refit then pcall(_G.EzWoWTooltipTagSizer.Refit, GameTooltip) end
 end
 function EzWoWFlightMapPinMixin:OnMouseLeave()
     if GameTooltip:IsOwned(self) then GameTooltip:Hide() end
