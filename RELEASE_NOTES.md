@@ -1,11 +1,13 @@
-# v2.0.6
+# v2.0.7
 
 ### 한국어
-- 전투 중 세계 지도에서 나던 "애드온 동작 차단" 오류를 수정했습니다.
-- 이륙·착륙 감지를 개선했고, 쓰지 않는 비행 지점을 지도에서 뺐습니다.
-- 비행 중 자동으로 열린 미니게임 창을 닫으면 다음 비행부터 자동으로 열지 않습니다.
+- 비행 지도 이름표를 이름과 시간만 한 줄로 짧게 보여 주는 설정을 추가했습니다(요금은 마우스를 올리면 표시, 기본으로 켜짐).
+- 겹친 이름표에 마우스를 올리면 그 이름표가 맨 앞으로 나오도록 했습니다.
+- 비행 조련사와 대화해서 바로 출발하는 비행(예: 달의 숲)도 비행 시간 막대를 보여 주고, 한 번 날아가면 도착지와 시간을 기억하도록 했습니다.
+- 세계지도 비행 조련사 툴팁 아래의 애드온 이름을 작은 회색 글씨로 바꿨습니다.
 
 ### English
-- Fixed blocked-action errors on the world map in combat.
-- Improved takeoff and landing detection; retired flight points are no longer shown.
-- Closing the mini games window that opened on a flight now stops it from opening on later flights.
+- Added a setting for short one-line flight map labels with just the name and time (cost shows on hover, on by default).
+- Hovering a label that overlaps others now brings it to the front.
+- Flights started by talking to a flight master (e.g. from Moonglade) now show the flight timer bar, and their destination and time are remembered after the first flight.
+- The addon name at the bottom of world map flight master tooltips is now small gray text.
