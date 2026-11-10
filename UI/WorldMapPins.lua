@@ -3,6 +3,9 @@
 -- UI/WorldMapPins.lua : WorldMap Flight Node Pins, Dock Toggle & Faction Filter Popover
 --===========================================================================
 local ADDON_NAME, ns = ...
+-- frames made on the World Map are made without a parent and put in after
+-- (Libs/EzWoWGamePad MakeFrame: keeps the game's gamepad cursor untainted)
+local CreateFrame = (ns.GamePad and ns.GamePad.MakeFrame) or CreateFrame
 -- Text for the game's AddOns panel in the six languages without their own line: { deDE, frFR, esES, ruRU, zhCN, zhTW }
 local PANEL_LANG_INDEX = { deDE = 1, frFR = 2, esES = 3, esMX = 3, ruRU = 4, zhCN = 5, zhTW = 6, de = 1, fr = 2, es = 3, ru = 4 }
 local function panelText(code, ko, en, others)
@@ -285,7 +288,9 @@ end
 
 function WorldMapPinProvider.buildMapToggle()
     local parent = WorldMapFrame.GetCanvasContainer and WorldMapFrame:GetCanvasContainer() or WorldMapFrame
-    local panelFrameEntry = CreateFrame("Frame", nil, parent)
+    -- made on the map window and anchored to the canvas: a frame inside the
+    -- canvas makes the map scroll when a gamepad cursor moves onto it
+    local panelFrameEntry = CreateFrame("Frame", nil, WorldMapFrame)
     panelFrameEntry:SetSize(28, 28)
     panelFrameEntry:SetMovable(true)
     panelFrameEntry:EnableMouse(true)
@@ -365,7 +370,7 @@ function WorldMapPinProvider.buildMapToggle()
         if GameTooltip:IsOwned(self) then GameTooltip:Hide() end
     end)
 
-    WorldMapFilterPopover = CreateFrame("Frame", "EzWoWFlightMapWorldPopover", parent, BackdropTemplateMixin and "BackdropTemplate" or nil)
+    WorldMapFilterPopover = CreateFrame("Frame", "EzWoWFlightMapWorldPopover", WorldMapFrame,BackdropTemplateMixin and "BackdropTemplate" or nil)
     WorldMapFilterPopover:SetSize(256, 92)
     WorldMapFilterPopover:SetFrameStrata("HIGH")
     WorldMapFilterPopover:SetFrameLevel(panelFrameEntry:GetFrameLevel() + 20)

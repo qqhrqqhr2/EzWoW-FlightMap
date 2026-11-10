@@ -10,7 +10,7 @@ local tsort = table.sort
 local WorldMapDockManager = ns.WorldMapDockManager or {}
 ns.WorldMapDockManager = WorldMapDockManager
 
-local DOCK_PROTOCOL_VERSION = 6
+local DOCK_PROTOCOL_VERSION = 7
 local DOCK_SLOT_PRIORITY = {
     EzWoW_MapFinder         = 1,
     EzWoW_FlightMap         = 2,
@@ -34,11 +34,20 @@ if type(DockCoordinator) ~= "table" or (DockCoordinator.version or 0) < DOCK_PRO
         return WorldMapFrame.ScrollContainer or WorldMapFrame
     end
 
+    -- Parent for dock buttons and panels: the map window, not the canvas.
+    -- They are still anchored to the canvas. With a gamepad, moving the
+    -- cursor onto a frame inside the canvas scrolls the map to show it, and
+    -- a frame that does not move with the map makes it scroll every time.
+    function DockCoordinator:GetHost()
+        return WorldMapFrame or UIParent
+    end
+
     function DockCoordinator:NormalizeButtonParent(btn, canvas)
         canvas = canvas or self:GetCanvas()
         if not (btn and canvas) then return canvas end
-        if btn.GetParent and btn:GetParent() ~= canvas and btn.SetParent then
-            pcall(btn.SetParent, btn, canvas)
+        local host = self:GetHost()
+        if host and btn.GetParent and btn:GetParent() ~= host and btn.SetParent then
+            pcall(btn.SetParent, btn, host)
         end
         if btn.GetScale and btn.SetScale and btn:GetScale() ~= 1 then
             pcall(btn.SetScale, btn, 1)

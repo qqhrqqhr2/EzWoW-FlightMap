@@ -290,10 +290,50 @@ function FlightRouteEngine.buildSnapshotHashKey(s)
     return table.concat(parts, ";")
 end
 
+-----------------------------------------------------------------------------
+-- Flight times shared with other players of the EzWoW addons
+-- (Libs/EzWoWShare, kind "T"): "seconds,route" where the route is the
+-- flight's time key with " | " written as "~". Route names are in the
+-- client's language, so only players with the same language exchange them.
+-- A time this character flew itself is always used first.
+-----------------------------------------------------------------------------
+if ns.Share and ns.Share.RegisterKind then
+    ns.Share.RegisterKind("T", {
+        localized = true,
+        own = function()
+            local out = {}
+            local times = ns.DB and ns.DB.times
+            if type(times) ~= "table" then return out end
+            for key, secs in pairs(times) do
+                if type(key) == "string" and type(secs) == "number" and secs >= 5 and secs <= 3600
+                    and not key:find("[;~]") then
+                    local route = key:gsub(" | ", "~")
+                    if not route:find("|", 1, true) then out[#out + 1] = math.floor(secs + 0.5) .. "," .. route end
+                end
+            end
+            return out
+        end,
+        receive = function(body)
+            local secs, route = body:match("^(%d+),(.+)$")
+            secs = tonumber(secs)
+            if not secs or secs < 5 or secs > 3600 or route:find("[\1-\31\127|]") then return false end
+            local key = route:gsub("~", " | ")
+            if ns.DB and type(ns.DB.times) == "table" and ns.DB.times[key] then return false end
+            local store = ns.Share.Store("T")
+            if store[key] == secs then return false end
+            store[key] = secs
+            return true
+        end,
+    })
+end
+
 function FlightRouteEngine.estimateFlightDuration(recordEntry)
     if not (ns.snap and ns.snap.current and recordEntry) then return end
     local recordItem = ns.DB.times[recordEntry.timeKey]
     if resolveFiniteNumber(recordItem) and recordItem >= 5 and recordItem <= 3600 then return recordItem, true end
+    -- a time other players of the EzWoW addons flew on this route (Libs/EzWoWShare)
+    local shared = ns.Share and recordEntry.timeKey and ns.Share.Store("T")[recordEntry.timeKey]
+    if resolveFiniteNumber(shared) and shared >= 5 and shared <= 3600 then return shared, true end
     if resolveFiniteNumber(recordEntry.dist) and recordEntry.dist > 0 then
         local speed = ns.DB.flightSpeeds[ns.snap.speedKey]
         if not resolveFiniteNumber(speed) or speed < 8 or speed > 120 then speed = 30.4 end

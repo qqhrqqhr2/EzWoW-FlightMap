@@ -23,9 +23,11 @@
 ## Version: 2.0.8
 ## Category: EzWoW
 ## IconTexture: Interface\AddOns\EzWoW-FlightMap\Media\Icon
-## SavedVariables: EzWoW_FlightMapDB
+## SavedVariables: EzWoW_FlightMapDB, EzWoW_SharedData
 ## X-Curse-Project-ID: 1736991
 
+Libs\EzWoWGamePad\GamePad.lua
+Libs\EzWoWShare\Share.lua
 Core\Init.lua
 Core\UIKit.lua
 Core\Locales.lua

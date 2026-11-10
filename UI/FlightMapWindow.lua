@@ -223,6 +223,11 @@ function FlightMapWindow.styleLabel(lb, selected)
         lb.leader:SetThickness(selected and 3 or 1)
         lb.leader:SetColorTexture(STYLE.accent[1], STYLE.accent[2], STYLE.accent[3], selected and 1 or (dimmed and 0.08 or 0.24))
     end
+    for i = 1, (lb.dotCount or 0) do
+        local d = lb.dots[i]
+        d:SetColorTexture(STYLE.accent[1], STYLE.accent[2], STYLE.accent[3], selected and 1 or (dimmed and 0.15 or 0.55))
+        d:SetSize(selected and 3 or 2, selected and 3 or 2)
+    end
     lb.info:SetTextColor(selected and 1 or STYLE.textBody[1], selected and 0.98 or STYLE.textBody[2], selected and 1 or STYLE.textBody[3])
     if lb.region then lb.region:SetTextColor(selected and 0.90 or STYLE.textMuted[1], selected and 0.94 or STYLE.textMuted[2], selected and 1 or STYLE.textMuted[3]) end
     lb.accent:SetWidth(selected and 4 or 2)
@@ -612,6 +617,8 @@ function FlightMapWindow.dismissLabel(lb)
     lb.info:Hide()
     lb.region:Hide()
     if lb.leader then lb.leader:Hide() end
+    for i = 1, #(lb.dots or {}) do lb.dots[i]:Hide() end
+    lb.dotCount = 0
     if lb.pin then lb.pin.label = nil end
     lb.pin, lb.node, lb.frame.pin = nil, nil, nil
 end
@@ -718,15 +725,17 @@ function FlightMapWindow.layoutNonOverlappingLabels(shown)
         end
         
         if compact then
-            -- centred under the pin; overlapping is fine, the hovered one comes to the front
-            bestX=max(0,min(maxX,pxVal-boxWidth/2));bestY=max(0,min(maxY,pyVal+item.r+2));bestOverlap=0
+            -- one-line labels are set out in two columns beside the land (see
+            -- placeCallouts below); here only the size is kept
+            item.lb,item.w,item.h=lb,boxWidth,headerBar
+            bestX=nil;bestScore=0;bestOverlap=0
         end
         for _,dyVal in ipairs(compact and {} or {0,-headerBar-4,headerBar+4,-2*(headerBar+4),2*(headerBar+4)}) do
             consider(pxVal+rowEntry,pyVal-headerBar/2+dyVal);consider(pxVal-rowEntry-boxWidth,pyVal-headerBar/2+dyVal)
         end
         if not compact then consider(pxVal-boxWidth/2,pyVal-rowEntry-headerBar);consider(pxVal-boxWidth/2,pyVal+rowEntry) end
         
-        if not bestX or bestOverlap>0 then
+        if not compact and (not bestX or bestOverlap>0) then
             local x0Val,x1Val=max(0,pxVal-boxWidth-200),min(maxX,pxVal+200)
             local y0Val,y1Val=max(0,pyVal-headerBar-160),min(maxY,pyVal+160)
             for coordY=y0Val,y1Val,12 do
@@ -734,7 +743,7 @@ function FlightMapWindow.layoutNonOverlappingLabels(shown)
             end
         end
         
-        if not bestX or bestOverlap>0 then
+        if not compact and (not bestX or bestOverlap>0) then
             -- A candidate scores at least dx^2 (and 1.3*dy^2), so once a best
             -- score exists only the box within that distance can win; limit
             -- the full-map scan to it (grid-aligned) to avoid frame spikes.
@@ -765,24 +774,179 @@ function FlightMapWindow.layoutNonOverlappingLabels(shown)
                 lb.name:SetWidth(boxWidth-10)
                 lb.name:SetPoint("LEFT",lb.frame,"LEFT",7,0)
             else
+                lb.name:SetJustifyH("LEFT")
                 lb.name:SetPoint("TOPLEFT",lb.frame,"TOPLEFT",8,-4)
                 lb.region:SetPoint("TOPLEFT",lb.frame,"TOPLEFT",8,-(size+6))
                 lb.info:SetPoint("TOPLEFT",lb.frame,"TOPLEFT",8,-(size*2+7))
             end
-            if lb.leader and not compact then
+            if lb.leader then
                 local exVal,eyVal=min(max(pxVal,bestX),bestX+boxWidth),min(max(pyVal,bestY),bestY+headerBar)
                 local dxVal,dyVal=exVal-pxVal,eyVal-pyVal
                 local distance=sqrt(dxVal*dxVal+dyVal*dyVal)
-                if distance>0 then
+                -- a one-line label right at its pin needs no line; one moved away does
+                if distance>0 and (not compact or distance>item.r+12) then
                     lb.leader:SetStartPoint("TOPLEFT",canvasViewport,pxVal+dxVal*(item.r+3)/distance,-(pyVal+dyVal*(item.r+3)/distance))
                     lb.leader:SetEndPoint("TOPLEFT",canvasViewport,exVal,-eyVal);lb.leader:Show()
                 end
             end
             FlightMapWindow.styleLabel(lb,false)
             lb.region:SetShown(not compact);lb.info:SetShown(not compact);lb.frame:Show()
-        else
+        elseif not compact then
 
             FlightMapWindow.dismissLabel(lb)
+        end
+    end
+    if compact then FlightMapWindow.placeCallouts(order,vwVal,vhVal) end
+end
+
+-- One-line labels in two columns out at sea: the pins on the west side of
+-- the land get theirs on the left, the others on the right, joined to their
+-- pins by dotted curves. The labels sit in slots from north to south; pins
+-- trade slots while two curves cross, so no two lines cross. No label covers
+-- another or a pin, so a click always picks the right flight.
+local DOT_GAP = 5
+local CURVE_STEPS = 12
+local function dot(lb, i)
+    lb.dots = lb.dots or {}
+    local d = lb.dots[i]
+    if not d then
+        d = labelOverlayLayer:CreateTexture(nil, "ARTWORK")
+        lb.dots[i] = d
+    end
+    return d
+end
+
+-- the curve of a label: out of the pin sideways, bending into the label's side
+local function curvePoints(item, steps)
+    local s = item.side == "left" and -1 or 1
+    local x0, y0 = item.px + s * (item.r + 2), item.py
+    local x3 = item.side == "left" and (item.lx + item.w) or item.lx
+    local y3 = item.ly + item.h / 2
+    local k = abs(x3 - x0) * 0.5
+    local c1x, c2x = x0 + s * k, x3 - s * k
+    local pts = {}
+    for i = 0, steps do
+        local t = i / steps
+        local u = 1 - t
+        local a, b2, c, d = u * u * u, 3 * u * u * t, 3 * u * t * t, t * t * t
+        pts[#pts + 1] = { a * x0 + b2 * c1x + c * c2x + d * x3, a * y0 + b2 * y0 + c * y3 + d * y3 }
+    end
+    return pts
+end
+
+local function segCross(p1, p2, p3, p4)
+    local function o(a, b2, c) return (b2[1] - a[1]) * (c[2] - a[2]) - (b2[2] - a[2]) * (c[1] - a[1]) end
+    return o(p1, p2, p3) * o(p1, p2, p4) < 0 and o(p3, p4, p1) * o(p3, p4, p2) < 0
+end
+
+local function curvesCross(a, c)
+    local A, C = curvePoints(a, CURVE_STEPS), curvePoints(c, CURVE_STEPS)
+    for i = 1, CURVE_STEPS do
+        for j = 1, CURVE_STEPS do
+            if segCross(A[i], A[i + 1], C[j], C[j + 1]) then return true end
+        end
+    end
+    return false
+end
+
+local function untangle(col)
+    for _ = 1, 60 do
+        local changed = false
+        for i = 1, #col do
+            for j = i + 1, #col do
+                local a, c = col[i], col[j]
+                if curvesCross(a, c) then
+                    a.ly, c.ly = c.ly, a.ly
+                    changed = true
+                end
+            end
+        end
+        if not changed then return end
+    end
+end
+
+local function drawDots(lb, item)
+    local pts = curvePoints(item, 40)
+    local n, carry = 0, 0
+    for i = 1, #pts - 1 do
+        local x1, y1, x2, y2 = pts[i][1], pts[i][2], pts[i + 1][1], pts[i + 1][2]
+        local dx, dy = x2 - x1, y2 - y1
+        local len = sqrt(dx * dx + dy * dy)
+        local pos = DOT_GAP - carry
+        while pos <= len do
+            n = n + 1
+            local d = dot(lb, n)
+            d:ClearAllPoints()
+            d:SetPoint("CENTER", canvasViewport, "TOPLEFT", x1 + dx * pos / len, -(y1 + dy * pos / len))
+            d:Show()
+            pos = pos + DOT_GAP
+        end
+        carry = len - (pos - DOT_GAP)
+    end
+    for i = n + 1, #(lb.dots or {}) do lb.dots[i]:Hide() end
+    lb.dotCount = n
+end
+
+function FlightMapWindow.placeCallouts(order, vwVal, vhVal)
+    if #order == 0 then return end
+    local minX, maxX = math.huge, -math.huge
+    for _, item in ipairs(order) do
+        minX = min(minX, item.px - item.r); maxX = max(maxX, item.px + item.r)
+    end
+    local midX = (minX + maxX) / 2
+    local GAP_X, GAP_Y, EDGE = 18, 3, 4
+    local columns = { left = {}, right = {} }
+    for _, item in ipairs(order) do
+        if item.lb then
+            item.side = item.px < midX and "left" or "right"
+            local col = columns[item.side]
+            col[#col + 1] = item
+        end
+    end
+    for side, col in pairs(columns) do
+        table.sort(col, function(a, c) return a.py < c.py end)
+        -- top to bottom: each slot as close to its pin's height as the one above allows
+        local y = EDGE
+        for _, item in ipairs(col) do
+            item.ly = max(y, item.py - item.h / 2)
+            y = item.ly + item.h + GAP_Y
+        end
+        -- pushed past the bottom: move the column up again from the end
+        local limit = vhVal - EDGE
+        for i = #col, 1, -1 do
+            local item = col[i]
+            if item.ly + item.h > limit then item.ly = limit - item.h end
+            limit = item.ly - GAP_Y
+        end
+        for _, item in ipairs(col) do
+            local w = item.w
+            -- out at the map's edges (the sea), as far from the land as the view allows
+            local x
+            if side == "left" then
+                x = min(max(EDGE + 8, (minX - GAP_X - w) * 0.25), minX - GAP_X - w)
+            else
+                x = max(min(vwVal - w - EDGE - 8, maxX + GAP_X + (vwVal - w - EDGE - 8 - maxX - GAP_X) * 0.75), maxX + GAP_X)
+            end
+            item.lx = max(EDGE, min(vwVal - w - EDGE, x))
+            item.ly = max(EDGE, min(vhVal - item.h - EDGE, item.ly))
+        end
+        untangle(col)
+        for _, item in ipairs(col) do
+            local lb, w, h, x, y0 = item.lb, item.w, item.h, item.lx, item.ly
+            lb.layoutX, lb.layoutY = x, y0
+            lb.frame:ClearAllPoints(); lb.frame:SetPoint("TOPLEFT", labelOverlayLayer, "TOPLEFT", x, -y0)
+            lb.frame:SetSize(w, h); lb.frame:SetFrameLevel(labelOverlayLayer:GetFrameLevel() + 1)
+            for _, labelRegion in ipairs({ lb.name, lb.region, lb.info }) do
+                labelRegion:ClearAllPoints()
+                if labelRegion.SetWordWrap then labelRegion:SetWordWrap(false) end
+            end
+            lb.name:SetWidth(w - 10)
+            lb.name:SetJustifyH(side == "left" and "RIGHT" or "LEFT")
+            lb.name:SetPoint(side == "left" and "RIGHT" or "LEFT", lb.frame, side == "left" and "RIGHT" or "LEFT", side == "left" and -7 or 7, 0)
+            if lb.leader then lb.leader:Hide() end
+            drawDots(lb, item)
+            FlightMapWindow.styleLabel(lb, false)
+            lb.region:Hide(); lb.info:Hide(); lb.frame:Show()
         end
     end
 end
@@ -1261,7 +1425,8 @@ end
 function FlightMapWindow.dismissAll()
     if CloseTaxiMap then CloseTaxiMap() end
     local tfVal = _G.TaxiFrame
-    if tfVal and tfVal:IsShown() and HideUIPanel then HideUIPanel(tfVal) end
+    -- (not with the gamepad on: see Libs/EzWoWGamePad)
+    if tfVal and tfVal:IsShown() and HideUIPanel and not (ns.GamePad and ns.GamePad.IsActive()) then HideUIPanel(tfVal) end
     if mainWindowFrame then mainWindowFrame:Hide() end
     FlightMapWindow.restoreDefaultFlightFrames()
 end
@@ -1348,6 +1513,11 @@ function FlightMapWindow.buildUI()
     titleText:SetTextColor(STYLE.accent[1], STYLE.accent[2], STYLE.accent[3])
     titleText:SetText(L.TITLE)
 
+    -- gamepad B closes the flight map the same way as this window's X (the
+    -- game's masked flight map is closed with it, see Libs/EzWoWGamePad)
+    if ns.GamePad and ns.GamePad.RegisterWindow then
+        ns.GamePad.RegisterWindow(mainWindowFrame, { close = function() FlightMapWindow.dismissAll() end })
+    end
     local close = createFlightMapButton(mainWindowFrame, 22, 22, false, FlightMapWindow.dismissAll)
     close:SetPoint("TOPRIGHT", mainWindowFrame, "TOPRIGHT", -8, -5)
     close.label:SetText("X")
@@ -1486,6 +1656,14 @@ function FlightMapWindow.constructMainFrame()
     return true
 end
 
+-- With the gamepad on, this window is used with the gamepad through the shared
+-- navigation (Libs/EzWoWGamePad: D-pad, A to fly, B to close); the game's own
+-- flight map is only masked, never hidden or closed as a panel from addon code
+-- (that taints the gamepad navigation).
+local function gamePadOn()
+    return ns.GamePad and ns.GamePad.IsActive() or false
+end
+
 function FlightMapWindow.openMainWindow()
     if not (ns.DB and ns.DB.enabled and currentState.open) then
         FlightMapWindow.restoreDefaultFlightFrames()
@@ -1546,7 +1724,7 @@ function FlightMapWindow.hasFlightMasterGossipOption(o)
 end
 
 function FlightMapWindow.onGossipShow()
-    if not (ns.DB and ns.DB.enabled and ns.DB.skipGossip) then return end
+    if not (ns.DB and ns.DB.enabled and ns.DB.skipGossip) or gamePadOn() then return end
     if IsShiftKeyDown and IsShiftKeyDown() then return end
     local groupLayoutData = C_GossipInfo
     if not (groupLayoutData and groupLayoutData.GetOptions and groupLayoutData.SelectOption) then return end
