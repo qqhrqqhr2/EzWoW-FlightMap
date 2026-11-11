@@ -26,7 +26,7 @@ local ADDON_NAME, ns = ...
 local type, pairs, ipairs, tonumber, tostring, pcall, next = type, pairs, ipairs, tonumber, tostring, pcall, next
 local floor, format, concat, max = math.floor, string.format, table.concat, math.max
 
-local LIB_VERSION = 1
+local LIB_VERSION = 3
 
 -- one table for every copy (a newer copy updates the functions in it)
 local lib = _G.EzWoW_Share
@@ -51,6 +51,8 @@ end
 if (tonumber(lib.version) or 0) >= LIB_VERSION then return end
 lib.version = LIB_VERSION
 lib.owner = ADDON_NAME
+-- this session's traffic, shown by /ezshare status
+lib.stats = lib.stats or { received = 0, players = 0, senders = {}, sent = 0 }
 
 local function isSecret(v) return issecretvalue and issecretvalue(v) end
 local function now() return (type(time) == "function" and time()) or 0 end
@@ -66,6 +68,8 @@ local TEXTS = {
         channelOff = "Only the party, raid and guild are used (no channel).",
         help = "/ezshare on | off | channel on | channel off | status",
         status = "Records: quests %d, rare sightings %d, drop sources %d, gathering spots %d.",
+        traffic = "This session: %d records received from %d players, %d messages sent.",
+        lastSend = "Last send: %s (targets %d).",
         seen = "Seen %s ago",
         seenShared = "Seen %s ago (shared)",
         droppedBy = "Drops from",
@@ -81,6 +85,8 @@ local TEXTS = {
         channelOff = "파티·공격대·길드로만 공유합니다(채널 안 씀).",
         help = "/ezshare on | off | channel on | channel off | status  (/공유)",
         status = "기록: 퀘스트 %d, 희귀 몬스터 목격 %d, 드롭 출처 %d, 채집 위치 %d.",
+        traffic = "이번 접속: 받은 기록 %d개 (보낸 사람 %d명), 보낸 메시지 %d개.",
+        lastSend = "마지막 보내기: %s (보낼 곳 %d곳).",
         seen = "%s 전 목격",
         seenShared = "%s 전 목격 (공유)",
         droppedBy = "드롭",
@@ -476,15 +482,27 @@ function lib.GetDropSources(itemID)
     return lib.reverseDrops[itemID]
 end
 
+-- Name lookups other addons add: function(kind, id) -> name or nil, where kind
+-- is "npc" or "object" (an addon's name tables in the player's language).
+lib.nameResolvers = lib.nameResolvers or {}
+
 function lib.SourceName(src)
     if type(src) ~= "string" then return nil end
     local name = lib.Data().names[src]
     if name then return name end
-    local api = _G.EzWoWMapFinderAPI
     local id = tonumber(src:sub(2))
-    if api and type(api.NameByID) == "function" and id then
-        local ok, n = pcall(api.NameByID, src:sub(1, 1) == "n" and "npc" or "object", id)
+    if not id then return nil end
+    local kind = src:sub(1, 1) == "n" and "npc" or "object"
+    local api = _G.EzWoWMapFinderAPI
+    if api and type(api.NameByID) == "function" then
+        local ok, n = pcall(api.NameByID, kind, id)
         if ok and type(n) == "string" and n ~= "" then return n end
+    end
+    for _, resolve in ipairs(lib.nameResolvers) do
+        if type(resolve) == "function" then
+            local ok, n = pcall(resolve, kind, id)
+            if ok and type(n) == "string" and n ~= "" and not isSecret(n) then return n end
+        end
     end
     return nil
 end
@@ -954,11 +972,17 @@ function lib.OnAddonMessage(prefix, text, channel, sender)
     if not kind or not payload then return end
     if not ((version == "1" and V1_KINDS[kind]) or (version == "2" and (V2_KINDS[kind] or lib.kinds[kind]))) then return end
     local hash = senderHash(sender)
+    local stats = lib.stats
+    if not stats.senders[hash] then
+        stats.senders[hash] = true
+        stats.players = stats.players + 1
+    end
     local needed = GROUP_CHANNELS[channel] and CONFIRM_GROUP or CONFIRM_PUBLIC
     local loc = locale()
     local localized = kind == "D" or kind == "O" or (lib.kinds[kind] and lib.kinds[kind].localized)
     for body in payload:gmatch("[^;]+") do
         if not allow(hash, 1) then break end
+        stats.received = stats.received + 1
         if localized then
             -- item names: only from players with the same client language
             local l, rest = body:match("^(%a%a%u%u),(.+)$")
@@ -1037,17 +1061,30 @@ local function nextMessage()
     return nil
 end
 
-function lib.SendTick()
-    if not lib.IsEnabled() then return end
-    if InCombatLockdown and InCombatLockdown() then return end
-    if not (C_ChatInfo and C_ChatInfo.SendAddonMessage) then return end
+local function sendTick()
+    if not lib.IsEnabled() then return "off" end
+    if InCombatLockdown and InCombatLockdown() then return "combat" end
+    if not (C_ChatInfo and C_ChatInfo.SendAddonMessage) then return "no api" end
     local list = targets()
-    if #list == 0 then return end
+    if #list == 0 then return "no target" end
     local msg = nextMessage()
-    if not msg then return end
+    if not msg then return "nothing new" end
+    local okAny, lastResult = false, nil
     for _, target in ipairs(list) do
-        pcall(C_ChatInfo.SendAddonMessage, PREFIX, msg, target[1], target[2])
+        local ok, result = pcall(C_ChatInfo.SendAddonMessage, PREFIX, msg, target[1], target[2])
+        lastResult = ok and result or ("error " .. tostring(result))
+        -- result: nil/true/0 when sent, otherwise a send-result code (throttled...)
+        if ok and (result == nil or result == true or result == 0) then okAny = true end
     end
+    if not okAny then return "send " .. tostring(lastResult) end
+    lib.stats.sent = lib.stats.sent + 1
+    return "sent"
+end
+
+-- the outcome of the last attempt is kept for /ezshare status
+function lib.SendTick()
+    local ok, note = pcall(sendTick)
+    lib.stats.note = ok and note or ("error " .. tostring(note))
 end
 
 -----------------------------------------------------------------------------
@@ -1265,6 +1302,9 @@ function lib.Slash(msg)
         say(lib.IsEnabled() and T("on") or T("off"))
         if lib.IsEnabled() then say(lib.UsesChannel() and T("channelOn") or T("channelOff")) end
         say(format(T("status"), counts()))
+        local stats = lib.stats
+        say(format(T("traffic"), stats.received, stats.players, stats.sent))
+        say(format(T("lastSend"), tostring(stats.note or "-"), #targets()))
     else
         say(T("help"))
     end
@@ -1285,13 +1325,13 @@ function lib.OnItemTooltip(tip, data)
     if isSecret(itemID) or type(itemID) ~= "number" then return end
     local list = lib.GetDropSources(itemID)
     if not list or #list == 0 then return end
-    local names = {}
+    -- sources without a known name are left out (no bare "object" word)
+    local names, seen = {}, {}
     for _, row in ipairs(list) do
         local name = lib.SourceName(row.src)
-        if name then
+        if name and not seen[name] then
+            seen[name] = true
             names[#names + 1] = name
-        elseif row.src:sub(1, 1) == "o" then
-            names[#names + 1] = T("object")
         end
         if #names >= TIP_SOURCES then break end
     end

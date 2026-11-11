@@ -42,7 +42,8 @@ jobs:
             python scripts/release.py
           fi
       - name: Upload to CurseForge
-        if: github.event_name == 'release' || inputs.upload
+        # Releases are uploaded from the maintainer's PC (updater STEP 7); run this only by hand.
+        if: github.event_name == 'workflow_dispatch' && inputs.upload
         env:
           CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           IS_RELEASE: ${{ github.event_name == 'release' }}
