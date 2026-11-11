@@ -107,6 +107,10 @@ ns.defaults = {
     showList          = true,
     listSort          = "name",
     pulse             = true,
+    worldArt          = true,   -- continent image with zone borders (off: the flight master's own map)
+    zoneNames         = true,   -- zone names and the zone highlight under the cursor
+    questMarks        = true,   -- turn-in spots of quests in the quest log
+    dungeonMarks      = true,   -- dungeon entrances with level ranges
     point             = nil,
     barPoint          = nil,
 }

@@ -49,6 +49,7 @@ local estimateFlightDuration = ns.EstimateRouteFlightDuration
 local tooExpensive = ns.IsRouteFareUnaffordable
 local resolveFareText = ns.FormatRouteFareDisplayText
 local hasRecent = ns.IsRecentlyVisitedDestination
+local Extras = ns.FlightMapExtras
 
 local mainWindowFrame, canvasViewport, labelOverlayLayer, titleText
 local tilePool, pinPool, linePool, labelPool = {}, {}, {}, {}
@@ -160,6 +161,8 @@ end
 function FlightMapWindow.isElementCurrentlyVisible(node)
 
     if node.type == "DISTANT" and type(node.name) == "string" and node.name:lower():match("^%s*zzold") then return false end
+    -- internal route targets ("Generic, World target", ...) are not flight points
+    if node.placeholder then return false end
     return node.x and (node.type ~= "DISTANT" or ns.DB.showUnreachable)
 end
 
@@ -555,6 +558,14 @@ function FlightMapWindow.buildPin()
     buttonWidget.ring:SetPoint("CENTER")
     buttonWidget.ring:SetSize(43, 43)
     buttonWidget.ring:Hide()
+    -- the flight point picked from a quest or dungeon marker
+    buttonWidget.pick = buttonWidget:CreateTexture(nil, "BACKGROUND", nil, 1)
+    if buttonWidget.pick:SetTexture(RING_FILE) == false then buttonWidget.pick:SetTexture(GLOW_FILE) end
+    buttonWidget.pick:SetBlendMode("ADD")
+    buttonWidget.pick:SetVertexColor(0.294, 0.784, 0.910)
+    buttonWidget.pick:SetPoint("CENTER")
+    buttonWidget.pick:SetSize(40, 40)
+    buttonWidget.pick:Hide()
     local hlVal = buttonWidget:CreateTexture(nil, "HIGHLIGHT")
     if hlVal:SetTexture(GLOW_FILE) == false then hlVal:SetTexture("Interface\\TaxiFrame\\UI-Taxi-Icon-Highlight") end
     hlVal:SetBlendMode("ADD")
@@ -587,7 +598,21 @@ function FlightMapWindow.buildLabel()
     lb.frame:RegisterForClicks("LeftButtonUp")
     lb.frame:SetScript("OnEnter", FlightMapWindow.pinOnenter)
     lb.frame:SetScript("OnLeave", FlightMapWindow.pinOnleave)
-    lb.frame:SetScript("OnClick", FlightMapWindow.pinOnclick)
+    lb.frame:SetScript("OnClick", function(self, ...)
+        if Extras and Extras.editMode then return end    -- edit mode: a click only moves the label
+        return FlightMapWindow.pinOnclick(self, ...)
+    end)
+    -- edit mode (/ezfl edit): the label itself is dragged to a new spot
+    lb.frame:SetScript("OnMouseDown", function(self, button)
+        if button ~= "LeftButton" or not (Extras and Extras.editMode and Extras.BeginDrag) then return end
+        local key = lb.layoutKey or (Extras.FlightLabelKey and Extras.FlightLabelKey(lb.node))
+        if not (key and lb.layoutX) then return end
+        local w, h = self:GetSize()
+        Extras.BeginDrag(lb.layoutX, lb.layoutY, w or 0, h or 0, key, function(x, y)
+            self:ClearAllPoints()
+            self:SetPoint("TOPLEFT", labelOverlayLayer, "TOPLEFT", x, -y)
+        end)
+    end)
     lb.frame:SetScript("OnHide", FlightMapWindow.pinOnleave)
     lb.accent = lb.frame:CreateTexture(nil, "ARTWORK")
     lb.accent:SetPoint("TOPLEFT", 1, -1)
@@ -816,20 +841,24 @@ local function dot(lb, i)
     return d
 end
 
--- the curve of a label: out of the pin sideways, bending into the label's side
+-- the curve of a label: one smooth bend from the pin into the label's side
 local function curvePoints(item, steps)
     local s = item.side == "left" and -1 or 1
-    local x0, y0 = item.px + s * (item.r + 2), item.py
     local x3 = item.side == "left" and (item.lx + item.w) or item.lx
     local y3 = item.ly + item.h / 2
-    local k = abs(x3 - x0) * 0.5
-    local c1x, c2x = x0 + s * k, x3 - s * k
+    local dx, dy = x3 - item.px, y3 - item.py
+    local dist = sqrt(dx * dx + dy * dy)
+    if dist < 1 then dist = 1 end
+    local x0, y0 = item.px + dx / dist * (item.r + 2), item.py + dy / dist * (item.r + 2)
+    local k = abs(x3 - x0)
+    local c1x, c1y = x0 + s * k * 0.55, y0 + (y3 - y0) * 0.55
+    local c2x, c2y = x3 - s * k * 0.35, y3
     local pts = {}
     for i = 0, steps do
         local t = i / steps
         local u = 1 - t
         local a, b2, c, d = u * u * u, 3 * u * u * t, 3 * u * t * t, t * t * t
-        pts[#pts + 1] = { a * x0 + b2 * c1x + c * c2x + d * x3, a * y0 + b2 * y0 + c * y3 + d * y3 }
+        pts[#pts + 1] = { a * x0 + b2 * c1x + c * c2x + d * x3, a * y0 + b2 * c1y + c * c2y + d * y3 }
     end
     return pts
 end
@@ -918,21 +947,59 @@ function FlightMapWindow.placeCallouts(order, vwVal, vhVal)
             if item.ly + item.h > limit then item.ly = limit - item.h end
             limit = item.ly - GAP_Y
         end
+        local function placeX()
         for _, item in ipairs(col) do
             local w = item.w
-            -- out at the map's edges (the sea), as far from the land as the view allows
+            -- next to the land: just past the outermost pin at the label's height
+            local bandMin, bandMax = math.huge, -math.huge
+            for _, other in ipairs(order) do
+                if other.py + other.r + 30 >= item.ly and other.py - other.r - 30 <= item.ly + item.h then
+                    bandMin = min(bandMin, other.px - other.r)
+                    bandMax = max(bandMax, other.px + other.r)
+                end
+            end
+            if bandMin == math.huge then bandMin, bandMax = minX, maxX end
+            -- and outside the land itself (the land's edge at the label's height)
+            local art = currentState.art
+            if Extras and Extras.LandSpan and art and art.mapID and currentState.s then
+                local s, cx0, cy0 = currentState.s, currentState.cx0 or 0, currentState.cy0 or 0
+                local ok, l, r = pcall(Extras.LandSpan, art.mapID, (item.ly - 4) / s + cy0, (item.ly + item.h + 4) / s + cy0)
+                if ok and l then
+                    bandMin = min(bandMin, (l - cx0) * s)
+                    bandMax = max(bandMax, (r - cx0) * s)
+                end
+            end
             local x
             if side == "left" then
-                x = min(max(EDGE + 8, (minX - GAP_X - w) * 0.25), minX - GAP_X - w)
+                x = bandMin - GAP_X - w
             else
-                x = max(min(vwVal - w - EDGE - 8, maxX + GAP_X + (vwVal - w - EDGE - 8 - maxX - GAP_X) * 0.75), maxX + GAP_X)
+                x = bandMax + GAP_X
             end
             item.lx = max(EDGE, min(vwVal - w - EDGE, x))
             item.ly = max(EDGE, min(vhVal - item.h - EDGE, item.ly))
         end
+        end
+        placeX()
         untangle(col)
+        placeX()   -- slots may have been traded: fit each label to its new height
+        -- labels moved by hand (/ezfl edit) keep their spot
+        local art = currentState.art
+        local view = art and art.mapID and Extras and Extras.SavedSpotView and {
+            mapID = art.mapID, s = currentState.s, cx0 = currentState.cx0, cy0 = currentState.cy0, W = currentState.W, H = currentState.H,
+        }
         for _, item in ipairs(col) do
+            item.key = view and item.lb and Extras.FlightLabelKey(item.lb.node) or nil
+            local sx, sy
+            if item.key then sx, sy = Extras.SavedSpotView(view, item.key) end
+            if sx then
+                item.lx, item.ly = sx - item.w / 2, sy - item.h / 2
+                item.side = sx < item.px and "left" or "right"
+            end
+        end
+        for _, item in ipairs(col) do
+            local side = item.side or side
             local lb, w, h, x, y0 = item.lb, item.w, item.h, item.lx, item.ly
+            lb.layoutKey = item.key
             lb.layoutX, lb.layoutY = x, y0
             lb.frame:ClearAllPoints(); lb.frame:SetPoint("TOPLEFT", labelOverlayLayer, "TOPLEFT", x, -y0)
             lb.frame:SetSize(w, h); lb.frame:SetFrameLevel(labelOverlayLayer:GetFrameLevel() + 1)
@@ -1097,7 +1164,7 @@ function FlightMapWindow.fillRow(rowWidget, node)
     local textW = LIST_W - 24 - 8
     rowWidget.name:SetWidth(max(40, textW - (rowWidget.time:GetStringWidth() or 0) - 6))
     rowWidget.region:SetWidth(max(40, textW - (rowWidget.fare:GetStringWidth() or 0) - 6))
-    rowWidget.sel:SetShown(hover.pin ~= nil and hover.pin == rowWidget.pin)
+    rowWidget.sel:SetShown((hover.pin ~= nil and hover.pin == rowWidget.pin) or (currentState.picked ~= nil and currentState.picked == node))
 end
 
 paintList = function()
@@ -1166,8 +1233,34 @@ end
 
 syncListSelection = function()
     for _, rowWidget in ipairs(listRows) do
-        if rowWidget:IsShown() then rowWidget.sel:SetShown(hover.pin ~= nil and hover.pin == rowWidget.pin) end
+        if rowWidget:IsShown() then
+            rowWidget.sel:SetShown((hover.pin ~= nil and hover.pin == rowWidget.pin)
+                or (currentState.picked ~= nil and currentState.picked == rowWidget.node))
+        end
     end
+end
+
+-- A quest or dungeon marker was clicked: mark its nearest flight point on the
+-- map and in the list (scrolled into view). Nothing is flown.
+function FlightMapWindow.pickNode(node)
+    if not (node and currentState.nodes) then return end
+    currentState.picked = node
+    for _, anchorTarget in ipairs(pinPool) do
+        if anchorTarget.pick then anchorTarget.pick:SetShown(anchorTarget.node ~= nil and anchorTarget.node == node) end
+    end
+    if destinationListPanel and ns.DB.showList then
+        for index, item in ipairs(listItems) do
+            if item == node then
+                local visible = FlightMapWindow.visibleRowCount()
+                if index <= listOffset or index > listOffset + visible then
+                    listOffset = max(0, index - floor(visible / 2))
+                end
+                break
+            end
+        end
+        paintList()
+    end
+    syncListSelection()
 end
 
 function FlightMapWindow.commitFilterStyle()
@@ -1310,12 +1403,45 @@ function FlightMapWindow.commitAlpha()
     if mainWindowFrame then mainWindowFrame:SetAlpha(ns.DB.alpha or 1) end
 end
 
+-- zone names, zone highlight and quest/dungeon markers (world map style only)
+function FlightMapWindow.renderMapExtras(art, shown, vwVal, vhVal)
+    if not Extras then return end
+    if not (art and art.kind == "world" and art.mapID) then Extras.Clear(); return end
+    local pins, labels = {}, {}
+    for _, item in ipairs(shown) do pins[#pins + 1] = { px = item.px, py = item.py, r = item.r } end
+    for _, lb in ipairs(labelPool) do
+        if lb.node and lb.frame:IsShown() and lb.layoutX then
+            local w, h = lb.frame:GetSize()
+            labels[#labels + 1] = { lb.layoutX, lb.layoutY, w or 0, h or 0 }
+        end
+    end
+    local isCallOk, errorText = pcall(Extras.Render, {
+        canvas = canvasViewport, mapID = art.mapID,
+        s = currentState.s, cx0 = currentState.cx0, cy0 = currentState.cy0, W = currentState.W, H = currentState.H,
+        vw = vwVal, vh = vhVal, nodes = currentState.nodes, pins = pins, labels = labels,
+        fontSize = ns.DB.labelSize or 12,
+        isVisible = FlightMapWindow.isElementCurrentlyVisible,
+        isBusy = function() return hover.pin ~= nil end,
+        onPick = FlightMapWindow.pickNode,
+    })
+    -- edit mode: the flight point labels are dragged by themselves (see buildLabel)
+    if not isCallOk then
+        Extras.Clear()
+        printAddonChatMessage(tostring(errorText))
+    end
+end
+
 renderFlightMapCanvas = function()
     local art, nodes = currentState.art, currentState.nodes
     if not art or not nodes then return end
     FlightMapWindow.resetHover()
     local W, H = art.w, art.h
     local x0Val, y0Val, x1Val, y1Val = FlightMapWindow.calculateViewportCropBounds(W, H, nodes)
+    -- continent image: only the part around the land (the same width on every continent)
+    local wc = art.kind == "world" and not ns.DB.crop and type(ns.WORLD_CROP) == "table" and ns.WORLD_CROP[art.mapID]
+    if type(wc) == "table" and type(wc[1]) == "number" and type(wc[2]) == "number" and wc[2] > wc[1] then
+        x0Val, x1Val = max(0, wc[1]), min(W, wc[2])
+    end
     local cwVal, chVal = x1Val - x0Val, y1Val - y0Val
     local uwVal, uhVal = UIParent:GetWidth(), UIParent:GetHeight()
     local listW = (ns.DB.showList and destinationListPanel) and (LIST_W + LIST_GAP) or 0
@@ -1393,12 +1519,14 @@ renderFlightMapCanvas = function()
             pinFrame:ClearAllPoints()
             pinFrame:SetPoint("CENTER", canvasViewport, "TOPLEFT", pxVal, -pyVal)
             pinFrame:Show()
+            if pinFrame.pick then pinFrame.pick:SetShown(currentState.picked == node) end
             currentState.pinByNode[node] = pinFrame
             if node.type == "CURRENT" then currentState.currentPin = pinFrame end
             shown[#shown + 1] = { pin = pinFrame, node = node, px = pxVal, py = pyVal, r = size / 2 }
         end
     end
     FlightMapWindow.layoutNonOverlappingLabels(shown)
+    FlightMapWindow.renderMapExtras(art, shown, vwVal, vhVal)
     FlightMapWindow.dismissLines()
     paintList()
     if locationPulseFrame then locationPulseFrame:Place() end
@@ -1422,7 +1550,42 @@ function FlightMapWindow.commitPosition()
     end
 end
 
+-- Look at a continent's flight map without a flight master (no flying):
+-- every known flight point of the continent, shown as not reachable.
+local PREVIEW_MAPS = { ek = 1415, eastern = 1415, ["동부"] = 1415, kal = 1414, kalimdor = 1414, ["칼림도어"] = 1414 }
+function FlightMapWindow.openPreview(which)
+    local mapID = PREVIEW_MAPS[(which or ""):lower()] or tonumber(which) or 1414
+    if not (C_TaxiMap and C_TaxiMap.GetTaxiNodesForMap) then return false end
+    if currentState.open and not currentState.preview then return false end   -- a real flight map is open
+    local ok, list = pcall(C_TaxiMap.GetTaxiNodesForMap, mapID)
+    if not ok or type(list) ~= "table" then return false end
+    local s = { bySlot = {}, list = {}, mapID = mapID, flightMapID = mapID, preview = true }
+    for _, info in ipairs(list) do
+        local pos = type(info) == "table" and info.position
+        local x, y
+        if type(pos) == "table" then
+            if pos.GetXY then x, y = pos:GetXY() else x, y = pos.x, pos.y end
+        end
+        if type(info.name) == "string" and x and y then
+            local slot = #s.list + 1
+            local rec = { slot = slot, type = "DISTANT", tx = x, ty = y, name = info.name }
+            s.bySlot[slot] = rec
+            s.list[slot] = rec
+        end
+    end
+    if #s.list == 0 then return false end
+    ns.snap = s
+    currentState.open, currentState.preview = true, true
+    FlightMapWindow.openMainWindow()
+    return mainWindowFrame ~= nil and mainWindowFrame:IsShown()
+end
+
 function FlightMapWindow.dismissAll()
+    if currentState.preview then
+        currentState.open, currentState.preview = false, nil
+        FlightMapWindow.closeActiveWindow()
+        return
+    end
     if CloseTaxiMap then CloseTaxiMap() end
     local tfVal = _G.TaxiFrame
     -- (not with the gamepad on: see Libs/EzWoWGamePad)
@@ -1619,6 +1782,43 @@ function FlightMapWindow.buildUI()
     hint:SetText(L.HINT)
     mainWindowFrame.hintText = hint
 
+    -- the sea picker under the map: Auto (by the month) -> each season -> plain
+    local SEA_ORDER = { "plain", "auto", "spring", "summer", "autumn", "winter", "parchment" }
+    local SEA_NAME = { spring = "SEA_SPRING", summer = "SEA_SUMMER", autumn = "SEA_AUTUMN", winter = "SEA_WINTER",
+        parchment = "SEA_PARCHMENT", plain = "SEA_PLAIN" }
+    local seaButton
+    local function seaText()
+        local mode = ns.DB.season or "plain"
+        local name
+        if mode == "auto" then
+            local season = Extras and Extras.Season and Extras.Season()
+            name = L.SEA_AUTO:format(season and L[SEA_NAME[season:lower()]] or "-")
+        else
+            name = L[SEA_NAME[mode]] or mode
+        end
+        return L.SEA_BUTTON:format(name)
+    end
+    seaButton = ns.CreateStyledButton(mainWindowFrame, 130, 18, false, function()
+        local mode = ns.DB.season or "plain"
+        local nextMode = "plain"
+        for i, m in ipairs(SEA_ORDER) do
+            if m == mode then nextMode = SEA_ORDER[i % #SEA_ORDER + 1]; break end
+        end
+        ns.DB.season = nextMode ~= "plain" and nextMode or nil
+        seaButton:SetText(seaText())
+        if mainWindowFrame:IsShown() and currentState.open then FlightMapWindow.constructMainFrame() end
+    end)
+    seaButton:SetPoint("BOTTOMLEFT", mainWindowFrame, "BOTTOMLEFT", PAD, 2)
+    seaButton:HookScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:AddLine(L.SEA_TIP, 1, 1, 1, true)
+        GameTooltip:Show()
+    end)
+    seaButton:HookScript("OnLeave", function() GameTooltip:Hide() end)
+    seaButton:SetScript("OnShow", function(self) self:SetText(seaText()) end)
+    seaButton:SetText(seaText())
+    mainWindowFrame.seaButton = seaButton
+
     FlightMapWindow.commitPosition()
 end
 
@@ -1627,12 +1827,39 @@ end
 -----------------------------------------------------------------------------
 function FlightMapWindow.constructMainFrame()
     if not ns.snap or #ns.snap.list == 0 then return false end
-    local art, kind = FlightMapWindow.readDefaultFlightArtwork(), "taxi"
+    local mapID = ns.snap.mapID or resolveContinentMapID()
+    for _, recordEntry in ipairs(ns.snap.list) do
+        recordEntry.placeholder = Extras and Extras.IsPlaceholderNode(recordEntry) or nil
+    end
+
+    -- World map style: the continent's world map art with the flight points
+    -- on its coordinates. Used only when every flight point can be placed;
+    -- otherwise (or when turned off) the flight master's own map is used.
+    local art, kind
+    if ns.DB.worldArt ~= false and Extras and mapID then
+        local isCallOk, worldArt = pcall(Extras.BuildWorldArt, mapID)
+        if isCallOk and worldArt then
+            local isValid, placed = pcall(Extras.ProjectNodes, ns.snap, mapID)
+            local missing = not isValid
+            if isValid then
+                for _, recordEntry in ipairs(ns.snap.list) do
+                    local retired = type(recordEntry.name) == "string" and recordEntry.name:lower():match("^%s*zzold")
+                    if not recordEntry.placeholder and not retired and not recordEntry.wx then missing = true; break end
+                end
+            end
+            if not missing and (placed or 0) > 0 then art, kind = worldArt, "world" end
+        end
+    end
+    if not art then
+        art, kind = FlightMapWindow.readDefaultFlightArtwork(), "taxi"
+    end
     if not art then return false end
 
     local nodes = {}
     for _, recordEntry in ipairs(ns.snap.list) do
-        if resolveFiniteNumber(recordEntry.plotX) and resolveFiniteNumber(recordEntry.plotY) then
+        if kind == "world" then
+            recordEntry.x, recordEntry.y = recordEntry.wx, recordEntry.wy
+        elseif resolveFiniteNumber(recordEntry.plotX) and resolveFiniteNumber(recordEntry.plotY) then
             recordEntry.x, recordEntry.y = recordEntry.plotX, recordEntry.plotY
         elseif resolveFiniteNumber(recordEntry.tx) and resolveFiniteNumber(recordEntry.ty) and recordEntry.tx >= 0 and recordEntry.tx <= 1 and recordEntry.ty >= 0 and recordEntry.ty <= 1 then
             recordEntry.x, recordEntry.y = recordEntry.tx, ns.snap.invertFlightAxisY and (1 - recordEntry.ty) or recordEntry.ty
@@ -1646,7 +1873,6 @@ function FlightMapWindow.constructMainFrame()
     currentState.nodes, currentState.art, currentState.artKind, currentState.bySlot = nodes, art, kind, ns.snap.bySlot
 
     local titleStr = L.TITLE
-    local mapID = ns.snap.mapID or resolveContinentMapID()
     if mapID and C_Map and C_Map.GetMapInfo then
         local apiInfo = C_Map.GetMapInfo(mapID)
         if apiInfo and apiInfo.name and apiInfo.name ~= "" then titleStr = titleStr .. " - " .. apiInfo.name end
@@ -1690,6 +1916,8 @@ function FlightMapWindow.closeActiveWindow()
     if mainWindowFrame then mainWindowFrame:Hide() end
     FlightMapWindow.restoreDefaultFlightFrames()
     currentState.nodes, currentState.art, currentState.bySlot, currentState.pinByNode, currentState.currentPin = nil, nil, nil, nil, nil
+    currentState.picked = nil
+    if Extras then Extras.Clear() end
     if destinationListPanel and destinationListPanel.search then
         destinationListPanel.search:ClearFocus()
         if (destinationListPanel.search:GetText() or "") ~= "" then destinationListPanel.search:SetText("") end
@@ -1769,6 +1997,10 @@ eventFrame:SetScript("OnEvent", function(_, event, arg1)
             hookPreMask("FlightMapFrame")
         end
     elseif event == "TAXIMAP_OPENED" then
+        if currentState.preview then
+            currentState.preview = nil
+            FlightMapWindow.closeActiveWindow()
+        end
         currentState.open = true
         currentState.generation = (currentState.generation or 0) + 1
         local generation = currentState.generation
@@ -1794,6 +2026,7 @@ eventFrame:SetScript("OnEvent", function(_, event, arg1)
     end
 end)
 
+ns.OpenPreview = FlightMapWindow.openPreview
 ns.Refresh = FlightMapWindow.refreshActiveView
 ns.Build = FlightMapWindow.constructMainFrame
 ns.RestoreDefaultFlightFrame = FlightMapWindow.restoreDefaultFlightFrames

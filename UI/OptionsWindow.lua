@@ -135,6 +135,10 @@ local SETTINGS = {
     { kind = "check",  key = "showUnreachable",   label = "OPT_ALL" },
     { kind = "check",  key = "showList",          label = "OPT_LIST", sub = "OPT_LIST_SUB" },
     { kind = "check",  key = "pulse",             label = "OPT_PULSE" },
+    { kind = "check",  key = "worldArt",          label = "OPT_WORLDART" },
+    { kind = "check",  key = "zoneNames",         label = "OPT_ZONENAMES" },
+    { kind = "check",  key = "questMarks",        label = "OPT_QUESTMARKS" },
+    { kind = "check",  key = "dungeonMarks",      label = "OPT_DUNGEONMARKS" },
     { kind = "check",  key = "autoSearch",        label = "OPT_AUTOSEARCH", sub = "OPT_AUTOSEARCH_SUB" },
     { kind = "slider", key = "scale",     label = "OPT_SCALE", min = 50, max = 120, step = 5, fmt = "%d%%" },
     { kind = "slider", key = "alpha",     label = "OPT_ALPHA", min = 0,  max = 70,  step = 5, fmt = "%d%%" },
@@ -696,6 +700,36 @@ SlashCmdList.EZWOWFLIGHTMAP = function(msg)
         if ns.GetMainFrame() then commitPosition() end
         printAddonChatMessage(L.MSG_RESET)
         refreshActiveView()
+    elseif cmd == "fx" or cmd == "효과" then
+        ns.DB.seasonFx = ns.DB.seasonFx == false and true or false
+        printAddonChatMessage("season fx: " .. (ns.DB.seasonFx and "ON" or "OFF"))
+        if ns.ScheduleRender then ns.ScheduleRender() end
+    elseif cmd == "season" or cmd == "계절" then
+        local pick = (rest or ""):lower()
+        local ok = { auto = true, spring = true, summer = true, autumn = true, winter = true, parchment = true, plain = true }
+        if ok[pick] then
+            ns.DB.season = pick ~= "plain" and pick or nil
+            printAddonChatMessage("season: " .. pick)
+            if ns.Refresh then ns.Refresh() end
+        else
+            printAddonChatMessage("/ezfl season [plain|auto|spring|summer|autumn|winter|parchment]  (" .. tostring(ns.DB.season or "plain") .. ")")
+        end
+    elseif cmd == "edit" or cmd == "편집" then
+        local Extras = ns.FlightMapExtras
+        if Extras then
+            if (rest or ""):lower() == "reset" then
+                Extras.ResetSpots()
+                printAddonChatMessage("label positions: reset")
+            else
+                Extras.editMode = not Extras.editMode
+                printAddonChatMessage("label edit: " .. (Extras.editMode and "ON (drag the names)" or "OFF"))
+            end
+            if ns.ScheduleRender then ns.ScheduleRender() end
+        end
+    elseif cmd == "preview" or cmd == "미리보기" then
+        if not (ns.OpenPreview and ns.OpenPreview(rest)) then
+            printAddonChatMessage("/ezfl preview [kal|ek]")
+        end
     elseif cmd == "donate" then
         SettingsDialog.openDonateDialog()
     else

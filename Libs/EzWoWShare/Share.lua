@@ -11,10 +11,16 @@
 --          what a quest item drops from (the quest addon adds the last two)
 --   rare   where and when a rare monster was seen
 --   drops  which creature / object an item was looted from
+-- How records travel:
+--   * to the party, raid and guild as addon messages;
+--   * to the other players in the hidden data channel as addon whispers, one
+--     player at a time (addon messages sent to the channel itself do not
+--     reach other players on this server, so the channel only tells who
+--     else uses EzWoW). Whispers are taken only from players on that list.
 -- Received records:
 --   * facts by ID (quest NPCs, drops) wait until enough different players
 --     sent the same one: one from the party, raid or guild, two from the
---     server-wide channel;
+--     players of the data channel;
 --   * sightings and spots are used as they arrive.
 -- Received records are never sent on and never replace this character's own.
 -- Senders are kept only as a number (no names are saved).
@@ -24,9 +30,9 @@
 -- records stay when some of the addons are turned off.
 local ADDON_NAME, ns = ...
 local type, pairs, ipairs, tonumber, tostring, pcall, next = type, pairs, ipairs, tonumber, tostring, pcall, next
-local floor, format, concat, max = math.floor, string.format, table.concat, math.max
+local floor, format, concat, max, min = math.floor, string.format, table.concat, math.max, math.min
 
-local LIB_VERSION = 3
+local LIB_VERSION = 5
 
 -- one table for every copy (a newer copy updates the functions in it)
 local lib = _G.EzWoW_Share
@@ -53,9 +59,12 @@ lib.version = LIB_VERSION
 lib.owner = ADDON_NAME
 -- this session's traffic, shown by /ezshare status
 lib.stats = lib.stats or { received = 0, players = 0, senders = {}, sent = 0 }
+lib.stats.via = lib.stats.via or {}          -- message type -> { players = n, seen = {} }
+lib.stats.results = lib.stats.results or {}  -- message type -> last send result
 
 local function isSecret(v) return issecretvalue and issecretvalue(v) end
 local function now() return (type(time) == "function" and time()) or 0 end
+local function clock() return (type(GetTime) == "function" and GetTime()) or 0 end
 
 -----------------------------------------------------------------------------
 -- Texts (English, Korean; other languages use English)
@@ -66,10 +75,23 @@ local TEXTS = {
         off = "Data sharing is off. Nothing is sent or received.",
         channelOn = "The shared data channel is used.",
         channelOff = "Only the party, raid and guild are used (no channel).",
-        help = "/ezshare on | off | channel on | channel off | status",
+        help = "/ezshare on | off | channel on | channel off | status | roster | ping [name]",
         status = "Records: quests %d, rare sightings %d, drop sources %d, gathering spots %d.",
         traffic = "This session: %d records received from %d players, %d messages sent.",
         lastSend = "Last send: %s (targets %d).",
+        via = "Players by way: %s",
+        unlisted = "whispers from players not on the list %d",
+        results = "Send results: %s",
+        roster = "Channel list: %d players to whisper (list %s, channel %s, entry %s, updated %s ago), whispered %d players.",
+        rosterNames = "On the list: %s",
+        noRoster = "The channel list could not be read (%s).",
+        seconds = "%ds",
+        unknownFaction = "(faction unknown %d)",
+        notFound = "Whispers that found no such player: %d (taken off the list).",
+        pingSent = "Delivery check sent to %s. No answer within 10 seconds means it did not arrive.",
+        pingFail = "Delivery check to %s could not be sent (%s).",
+        pingSelf = "Delivery check: the whisper to yourself came back. Addon whispers are delivered.",
+        pong = "Delivery check: %s answered (both have the new version).",
         seen = "Seen %s ago",
         seenShared = "Seen %s ago (shared)",
         droppedBy = "Drops from",
@@ -83,10 +105,23 @@ local TEXTS = {
         off = "데이터 공유를 껐습니다. 보내지도 받지도 않습니다.",
         channelOn = "공유 데이터 채널을 씁니다.",
         channelOff = "파티·공격대·길드로만 공유합니다(채널 안 씀).",
-        help = "/ezshare on | off | channel on | channel off | status  (/공유)",
+        help = "/ezshare on | off | channel on | channel off | status | roster | ping [이름]  (/공유)",
         status = "기록: 퀘스트 %d, 희귀 몬스터 목격 %d, 드롭 출처 %d, 채집 위치 %d.",
         traffic = "이번 접속: 받은 기록 %d개 (보낸 사람 %d명), 보낸 메시지 %d개.",
         lastSend = "마지막 보내기: %s (보낼 곳 %d곳).",
+        via = "보낸 사람 경로: %s",
+        unlisted = "명단 밖 귓속말 %d명",
+        results = "보내기 결과: %s",
+        roster = "채널 명단: 귓속말 대상 %d명 (명단 %s명, 채널 %s명, 목록 번호 %s, %s 전 갱신), 귓속말 보낸 사람 %d명.",
+        rosterNames = "명단: %s",
+        noRoster = "채널 명단을 읽지 못했습니다 (%s).",
+        seconds = "%d초",
+        unknownFaction = "(진영 모름 %d명)",
+        notFound = "받는 사람을 찾지 못한 귓속말: %d번 (명단에서 뺌).",
+        pingSent = "%s님에게 전달 확인을 보냈습니다. 10초 안에 응답이 없으면 전달되지 않은 것입니다.",
+        pingFail = "%s님에게 전달 확인을 보내지 못했습니다 (%s).",
+        pingSelf = "전달 확인: 나에게 보낸 귓속말이 돌아왔습니다. 애드온 귓속말이 전달됩니다.",
+        pong = "전달 확인: %s님이 응답했습니다 (양쪽 모두 새 버전).",
         seen = "%s 전 목격",
         seenShared = "%s 전 목격 (공유)",
         droppedBy = "드롭",
@@ -964,10 +999,286 @@ function lib.GetGatherSpots(objectID)
     return type(list) == "table" and list or nil
 end
 
+-----------------------------------------------------------------------------
+-- The players of the data channel: who gets whispers, whose are taken
+-----------------------------------------------------------------------------
+local ROSTER_EVERY = 60     -- seconds between channel list requests
+local ROSTER_AGAIN = 10     -- a whisper from a player not listed asks again after this long
+local HELD_WAIT = 30        -- such a whisper waits this long for a fresh list
+local HELD_MAX = 40
+local MAX_ROSTER = 500
+
+-- list = { { name = whisper target (as the list gives it), key = base name }, ... }
+local roster = { list = {}, byKey = {}, asked = 0 }
+local held = {}             -- whispers waiting for the list: { text, sender, t }
+local accept                -- handles a message that passed the checks (below)
+
+local RACE_FACTION = {
+    Human = "Alliance", Dwarf = "Alliance", NightElf = "Alliance", Gnome = "Alliance", Draenei = "Alliance",
+    Worgen = "Alliance", VoidElf = "Alliance", LightforgedDraenei = "Alliance", DarkIronDwarf = "Alliance",
+    KulTiran = "Alliance", Mechagnome = "Alliance",
+    Orc = "Horde", Scourge = "Horde", Tauren = "Horde", Troll = "Horde", BloodElf = "Horde", Goblin = "Horde",
+    Nightborne = "Horde", HighmountainTauren = "Horde", MagharOrc = "Horde", ZandalariTroll = "Horde",
+    Vulpera = "Horde",
+}
+
+-- the name without realm or family name (to compare senders with the list)
+local function baseName(name)
+    if type(name) ~= "string" or isSecret(name) then return nil end
+    name = name:match("^[^%-]+") or name
+    name = name:match("^(%S+)") or name
+    return name ~= "" and name or nil
+end
+
+local function serverOf(guid)
+    if type(guid) ~= "string" or isSecret(guid) then return nil end
+    return guid:match("^Player%-(%d+)%-")
+end
+
+local UNREACHABLE_FOR = 600     -- seconds a player not found is left off the list
+local unreachable = {}          -- base name -> time until left off (this session)
+
+local myKey, myServer, myFaction
+local function learnMe()
+    if myKey then return end
+    local okN, name = pcall(UnitName, "player")
+    if okN then myKey = baseName(name) end
+    local okG, guid = pcall(UnitGUID, "player")
+    if okG then myServer = serverOf(guid) end
+    if UnitFactionGroup then
+        local okF, faction = pcall(UnitFactionGroup, "player")
+        if okF and type(faction) == "string" and not isSecret(faction) then myFaction = faction end
+    end
+end
+
+-- a list entry, or nil for this character and players of another faction or
+-- server (whispers cannot reach them)
+local function member(name, guid)
+    if type(name) ~= "string" or isSecret(name) or name == "" then return nil end
+    learnMe()
+    local key = baseName(name)
+    if not key or key == myKey then return nil end
+    -- whispered a moment ago and not found: left out for a while
+    if (unreachable[key] or 0) > clock() then return nil end
+    local faction
+    if type(guid) == "string" and not isSecret(guid) then
+        local server = serverOf(guid)
+        if server and myServer and server ~= myServer then return nil end
+        if GetPlayerInfoByGUID then
+            local ok, _, _, _, race = pcall(GetPlayerInfoByGUID, guid)
+            faction = ok and type(race) == "string" and not isSecret(race) and RACE_FACTION[race] or nil
+            if faction and myFaction and faction ~= myFaction then return nil end
+        end
+    end
+    -- faction unknown: the game has no details of that player yet
+    return { name = name, key = key, unknown = faction == nil or nil }
+end
+
+local function removeMember(key)
+    if not key or not roster.byKey[key] then return end
+    roster.byKey[key] = nil
+    local list = {}
+    for _, m in ipairs(roster.list) do
+        if m.key ~= key then list[#list + 1] = m end
+    end
+    roster.list = list
+end
+
+local function inRoster(sender)
+    local key = baseName(sender)
+    return key ~= nil and roster.byKey[key] ~= nil
+end
+
+local function channelNumber()
+    if not GetChannelName then return nil end
+    local ok, id = pcall(GetChannelName, CHANNEL_NAME)
+    return ok and type(id) == "number" and not isSecret(id) and id > 0 and id or nil
+end
+
+-- the data channel's row in the game's channel list, and its member count
+local function displayRow()
+    if not (GetNumDisplayChannels and GetChannelDisplayInfo) then return nil, nil, "no api" end
+    local number = channelNumber()
+    if not number then return nil, nil, "not joined" end
+    local okN, n = pcall(GetNumDisplayChannels)
+    if not okN or type(n) ~= "number" or isSecret(n) then return nil, nil, "no list" end
+    local wanted = CHANNEL_NAME:lower()
+    for i = 1, min(n, 100) do
+        local ok, name, header, _, num, count = pcall(GetChannelDisplayInfo, i)
+        if ok and not isSecret(header) and not header then
+            local hit = type(num) == "number" and not isSecret(num) and num == number
+            if not hit and type(name) == "string" and not isSecret(name) then
+                hit = name:lower():find(wanted, 1, true) ~= nil
+            end
+            if hit then
+                return i, (type(count) == "number" and not isSecret(count)) and count or nil
+            end
+        end
+    end
+    return nil, nil, "not listed"
+end
+
+local function rosterInfoFn()
+    if C_ChatInfo and type(C_ChatInfo.GetChannelRosterInfo) == "function" then return C_ChatInfo.GetChannelRosterInfo end
+    if type(_G.GetChannelRosterInfo) == "function" then return _G.GetChannelRosterInfo end
+    return nil
+end
+
+-- reads the list the game holds for the channel (asked for with requestRoster)
+local function readRoster()
+    local display, count, why = displayRow()
+    roster.display, roster.channelCount = display, count
+    if not display then roster.why = why return false end
+    local info = rosterInfoFn()
+    if not info then roster.why = "no api" return false end
+    local n = count
+    if type(GetNumChannelMembers) == "function" then
+        local ok, c = pcall(GetNumChannelMembers, display)
+        if ok and type(c) == "number" and not isSecret(c) then n = c end
+    end
+    local list, byKey, raw = {}, {}, 0
+    for i = 1, min(n or MAX_ROSTER, MAX_ROSTER) do
+        local ok, name, _, _, guid = pcall(info, display, i)
+        if ok and type(name) == "string" then
+            raw = raw + 1
+            local m = member(name, guid)
+            if m and not byKey[m.key] then
+                byKey[m.key] = m
+                list[#list + 1] = m
+            end
+        elseif not n then
+            break
+        end
+    end
+    if raw == 0 then roster.why = "empty" return false end
+    -- more names than the channel has: the game gave another channel's list
+    if count and raw > count + 5 then roster.why = "other list" return false end
+    roster.list, roster.byKey, roster.raw, roster.at, roster.why = list, byKey, raw, clock(), nil
+    return true
+end
+
+-- whispers held for a fresher list: taken once the sender is listed
+local function releaseHeld()
+    if #held == 0 then return end
+    local t = clock()
+    local waiting = held
+    held = {}
+    for _, h in ipairs(waiting) do
+        if inRoster(h.sender) then
+            pcall(accept, h.text, "WHISPER", h.sender)
+        elseif t - h.t < HELD_WAIT then
+            held[#held + 1] = h
+        end
+    end
+end
+
+-- asks the game for the channel's member list (CHANNEL_ROSTER_UPDATE follows)
+local function requestRoster()
+    roster.asked = clock()
+    local display = displayRow()
+    local frame = _G.ChannelFrame
+    local busy = frame and frame.IsShown and frame:IsShown()
+    if display and type(SetSelectedDisplayChannel) == "function" and not busy then
+        pcall(SetSelectedDisplayChannel, display)
+    end
+    if readRoster() then releaseHeld() end
+end
+lib.RequestRoster = requestRoster
+
+local function onChannelMember(joined, name, channelName, guid)
+    if type(channelName) ~= "string" or isSecret(channelName) or channelName:lower() ~= CHANNEL_NAME:lower() then return end
+    local m = member(name, guid)
+    if not m then return end
+    if not joined then
+        removeMember(m.key)
+    elseif not roster.byKey[m.key] then
+        roster.byKey[m.key] = m
+        roster.list[#roster.list + 1] = m
+        releaseHeld()
+    end
+end
+
+local function countWay(field, hash)
+    local stats = lib.stats
+    local w = stats[field]
+    if type(w) ~= "table" then
+        w = { players = 0, seen = {} }
+        stats[field] = w
+    end
+    if not w.seen[hash] then
+        w.seen[hash] = true
+        w.players = w.players + 1
+    end
+end
+
+-- Delivery check (/ezshare ping [name]): an addon whisper to this character or
+-- to another player; players with this version answer. Format 0 is ignored by
+-- every copy as a record.
+local PING, PONG = "0P|ping", "0Q|pong"
+local pongAt = {}       -- sender -> time answered (one answer per 10 seconds)
+
+local function whisperRaw(text, target)
+    if not (C_ChatInfo and C_ChatInfo.SendAddonMessage) then return false, "no api" end
+    local ok, result = pcall(C_ChatInfo.SendAddonMessage, PREFIX, text, "WHISPER", target)
+    if ok and (result == nil or result == true or result == 0) then return true end
+    return false, ok and tostring(result) or "error"
+end
+
+function lib.OnPing(text, sender)
+    learnMe()
+    if text == PONG then
+        say(format(T("pong"), sender))
+    elseif isMe(sender) or baseName(sender) == myKey then
+        say(T("pingSelf"))
+    elseif clock() - (pongAt[sender] or -100) >= 10 then
+        pongAt[sender] = clock()
+        whisperRaw(PONG, sender)
+    end
+end
+
+function lib.Ping(target)
+    if type(target) ~= "string" or target == "" then
+        -- this character by its full name: the family name is part of it
+        -- (UnitName's second value, unless that is the realm)
+        local ok, name, second = pcall(UnitName, "player")
+        target = ok and type(name) == "string" and not isSecret(name) and name or nil
+        if target and type(second) == "string" and not isSecret(second) and second ~= "" then
+            local realm = (GetRealmName and GetRealmName()) or ""
+            local normalized = (GetNormalizedRealmName and GetNormalizedRealmName()) or ""
+            if second ~= realm and second ~= normalized then target = target .. " " .. second end
+        end
+    end
+    if not target then return end
+    local ok, why = whisperRaw(PING, target)
+    if ok then
+        say(format(T("pingSent"), target))
+    else
+        say(format(T("pingFail"), target, tostring(why)))
+    end
+end
+
 function lib.OnAddonMessage(prefix, text, channel, sender)
     if isSecret(prefix) or isSecret(text) or isSecret(channel) or isSecret(sender) then return end
     if prefix ~= PREFIX or type(text) ~= "string" or type(sender) ~= "string" or not lib.IsEnabled() then return end
-    if channel == "WHISPER" or isMe(sender) then return end
+    if channel == "WHISPER" and (text == PING or text == PONG) then
+        lib.OnPing(text, sender)
+        return
+    end
+    if isMe(sender) or not text:find("^%d%u|.") then return end
+    if channel == "WHISPER" then
+        -- whispers are taken only from the players of the data channel
+        if not lib.UsesChannel() then return end
+        if not inRoster(sender) then
+            countWay("unlisted", senderHash(sender))
+            if #held < HELD_MAX then held[#held + 1] = { text = text, sender = sender, t = clock() } end
+            if clock() - (roster.asked or 0) >= ROSTER_AGAIN then requestRoster() end
+            return
+        end
+    end
+    accept(text, channel, sender)
+end
+
+accept = function(text, channel, sender)
     local version, kind, payload = text:match("^(%d)(%u)|(.+)$")
     if not kind or not payload then return end
     if not ((version == "1" and V1_KINDS[kind]) or (version == "2" and (V2_KINDS[kind] or lib.kinds[kind]))) then return end
@@ -977,6 +1288,12 @@ function lib.OnAddonMessage(prefix, text, channel, sender)
         stats.senders[hash] = true
         stats.players = stats.players + 1
     end
+    -- which way the players reached us (channel, guild, party...)
+    local way = type(channel) == "string" and channel or "?"
+    stats.via = stats.via or {}
+    local w = stats.via[way] or { players = 0, seen = {} }
+    stats.via[way] = w
+    if not w.seen[hash] then w.seen[hash] = true; w.players = w.players + 1 end
     local needed = GROUP_CHANNELS[channel] and CONFIRM_GROUP or CONFIRM_PUBLIC
     local loc = locale()
     local localized = kind == "D" or kind == "O" or (lib.kinds[kind] and lib.kinds[kind].localized)
@@ -997,10 +1314,10 @@ end
 -----------------------------------------------------------------------------
 -- Messages: sending (one message every few seconds, own records only)
 -----------------------------------------------------------------------------
-local sentAt = {}        -- record text -> time sent (this session)
+local sentAt = {}        -- record key -> time sent to the party, raid and guild (this session)
+local groupTurn = { turn = 0 }
 local channelReady = false
 local BASE_ORDER = { "E", "S", "V", "I", "O", "D", "R", "L", "G" }
-local kindTurn = 0
 
 local function kindOrder()
     local order = {}
@@ -1017,68 +1334,180 @@ local function targets()
     elseif IsInGroup and IsInGroup(LE_PARTY_CATEGORY_HOME) then
         list[#list + 1] = { "PARTY" }
     end
-    if channelReady and lib.UsesChannel() and GetChannelName then
-        local ok, id = pcall(GetChannelName, CHANNEL_NAME)
-        if ok and type(id) == "number" and not isSecret(id) and id > 0 then list[#list + 1] = { "CHANNEL", id } end
-    end
     return list
 end
 
-local function nextMessage()
-    local t = now()
+-- this character's records, ready to send: { kind, version, key, body }
+local function collect()
     local loc = locale()
-    local byKind = {}
+    local out = {}
     for _, rec in ipairs(ownRecords()) do
         local kind, body, version = rec[1], rec[2], rec[3]
         if kind == "D" or kind == "O" or (lib.kinds[kind] and lib.kinds[kind].localized) then body = loc .. "," .. body end
         -- a sighting is sent again as soon as it changes
         local key = kind .. ";" .. (kind == "R" and (body:match("^(%d+),") .. ":" .. tostring(rec[4])) or body)
-        local last = sentAt[key]
-        if not last or t - last > RESEND_AFTER then
-            byKind[kind] = byKind[kind] or { version = version }
-            local list = byKind[kind]
-            list[#list + 1] = { key = key, body = body }
+        out[#out + 1] = { kind = kind, version = version, key = key, body = body }
+    end
+    return out
+end
+
+-- one message of the records not sent yet (sent: record key -> time; a
+-- record goes again after resendAfter seconds, never when that is nil)
+local function pack(records, sent, resendAfter, state)
+    local t = now()
+    local byKind = {}
+    for _, rec in ipairs(records) do
+        local last = sent[rec.key]
+        if not last or (resendAfter and t - last > resendAfter) then
+            local list = byKind[rec.kind]
+            if not list then
+                list = { version = rec.version }
+                byKind[rec.kind] = list
+            end
+            list[#list + 1] = rec
         end
     end
     -- kinds take turns, so many drops do not hold back the rest
     local order = kindOrder()
     for i = 1, #order do
-        local kind = order[(kindTurn + i - 1) % #order + 1]
+        local kind = order[(state.turn + i - 1) % #order + 1]
         local list = byKind[kind]
         if list then
-            kindTurn = (kindTurn + i) % #order
+            state.turn = (state.turn + i) % #order
             local head = list.version .. kind .. "|"
-            local parts, size = {}, #head
+            local parts, keys, size = {}, {}, #head
             for _, rec in ipairs(list) do
                 if size + #rec.body + 1 > MAX_MSG then break end
                 parts[#parts + 1] = rec.body
+                keys[#keys + 1] = { rec.key, sent[rec.key] }
                 size = size + #rec.body + 1
-                sentAt[rec.key] = t
+                sent[rec.key] = t
             end
-            if #parts > 0 then return head .. concat(parts, ";") end
+            if #parts > 0 then return head .. concat(parts, ";"), keys end
         end
     end
     return nil
+end
+
+-- a message that could not be sent: its records count as not sent
+local function unsend(sent, keys)
+    for _, k in ipairs(keys or {}) do sent[k[1]] = k[2] end
+end
+
+-- Whispers: one player of the channel list per tick, in turn. Each player
+-- gets a record once this session (it is saved on their side).
+local whisperTurn = 0
+local whispered = {}     -- list key -> { sent = { record key -> time }, turn = n, any = true|nil }
+local whisperedCount = 0
+local recentWhisper = {} -- whisper target -> time (to hide "no such player" notices)
+
+local function nextWhisper(records)
+    local list = roster.list
+    local n = #list
+    for _ = 1, n do
+        whisperTurn = whisperTurn % n + 1
+        local m = list[whisperTurn]
+        local w = whispered[m.key]
+        if not w then
+            w = { sent = {}, turn = 0 }
+            whispered[m.key] = w
+        end
+        local msg, keys = pack(records, w.sent, nil, w)
+        if msg then return m, msg, w, keys end
+    end
+    return nil
+end
+
+local function sendOne(msg, way, target)
+    local ok, result = pcall(C_ChatInfo.SendAddonMessage, PREFIX, msg, way, target)
+    lib.stats.results = lib.stats.results or {}
+    lib.stats.results[way] = ok and tostring(result) or "error"
+    -- result: nil/true/0 when sent, otherwise a send-result code (throttled...)
+    if ok and (result == nil or result == true or result == 0) then return true end
+    return false, ok and tostring(result) or ("error " .. tostring(result))
 end
 
 local function sendTick()
     if not lib.IsEnabled() then return "off" end
     if InCombatLockdown and InCombatLockdown() then return "combat" end
     if not (C_ChatInfo and C_ChatInfo.SendAddonMessage) then return "no api" end
+    local useChannel = channelReady and lib.UsesChannel()
+    if useChannel and clock() - (roster.asked or 0) >= ROSTER_EVERY then requestRoster() end
     local list = targets()
-    if #list == 0 then return "no target" end
-    local msg = nextMessage()
-    if not msg then return "nothing new" end
-    local okAny, lastResult = false, nil
-    for _, target in ipairs(list) do
-        local ok, result = pcall(C_ChatInfo.SendAddonMessage, PREFIX, msg, target[1], target[2])
-        lastResult = ok and result or ("error " .. tostring(result))
-        -- result: nil/true/0 when sent, otherwise a send-result code (throttled...)
-        if ok and (result == nil or result == true or result == 0) then okAny = true end
+    local whisperOn = useChannel and #roster.list > 0
+    if #list == 0 and not whisperOn then return "no target" end
+    local records = collect()
+    local notes = {}
+    if #list > 0 then
+        local msg, keys = pack(records, sentAt, RESEND_AFTER, groupTurn)
+        if msg then
+            local okAny, last = false, nil
+            for _, target in ipairs(list) do
+                local ok, why = sendOne(msg, target[1])
+                if ok then okAny = true else last = why end
+            end
+            notes[#notes + 1] = okAny and "group sent" or ("group " .. tostring(last))
+            if okAny then lib.stats.sent = lib.stats.sent + 1 else unsend(sentAt, keys) end
+        else
+            notes[#notes + 1] = "group nothing new"
+        end
     end
-    if not okAny then return "send " .. tostring(lastResult) end
-    lib.stats.sent = lib.stats.sent + 1
-    return "sent"
+    if whisperOn then
+        local m, msg, w, keys = nextWhisper(records)
+        if m then
+            recentWhisper[m.name] = clock()
+            local ok, why = sendOne(msg, "WHISPER", m.name)
+            notes[#notes + 1] = ok and "whisper sent" or ("whisper " .. tostring(why))
+            if ok then
+                lib.stats.sent = lib.stats.sent + 1
+                if not w.any then
+                    w.any = true
+                    whisperedCount = whisperedCount + 1
+                end
+            else
+                unsend(w.sent, keys)
+            end
+        else
+            notes[#notes + 1] = "whisper nothing new"
+        end
+    end
+    return concat(notes, ", ")
+end
+
+-- "no such player" notices for a whisper sent a moment ago are not shown;
+-- that player is taken off the list
+local notFoundPattern
+function lib.HideWhisperError(msg)
+    if type(msg) ~= "string" or isSecret(msg) then return false end
+    if not notFoundPattern then
+        local fmt = _G.ERR_CHAT_PLAYER_NOT_FOUND_S
+        if type(fmt) ~= "string" or isSecret(fmt) then return false end
+        -- Korean particle codes ("|1이라는;라는;") may come resolved or not
+        fmt = fmt:gsub("|1[^;]*;[^;]*;", "\1")
+        local escaped = fmt:gsub("([%%%(%)%.%+%-%*%?%[%]%^%$])", "%%%1")
+        escaped = escaped:gsub("%%%%s", "\2")
+        notFoundPattern = "^" .. (escaped:gsub("[\1\2]", ".-")) .. "$"
+    end
+    if not msg:find(notFoundPattern) then return false end
+    -- the whisper target named in the notice (sent in the last 15 seconds)
+    local t = clock()
+    for name, at in pairs(recentWhisper) do
+        if t - at <= 15 and msg:find(name, 1, true) then
+            lib.stats.notFound = (lib.stats.notFound or 0) + 1
+            -- the last few names, shown by /ezshare status (this session only)
+            local names = lib.stats.notFoundNames or {}
+            lib.stats.notFoundNames = names
+            local key = baseName(name)
+            -- "?" marks a player whose faction was not known
+            local m = key and roster.byKey[key]
+            names[#names + 1] = (m and m.unknown) and (name .. "(?)") or name
+            if #names > 5 then table.remove(names, 1) end
+            if key then unreachable[key] = clock() + UNREACHABLE_FOR end
+            removeMember(key)
+            return true
+        end
+    end
+    return false
 end
 
 -- the outcome of the last attempt is kept for /ezshare status
@@ -1172,6 +1601,7 @@ local function finishPlacing(ok)
     if ok then
         channelReady = true
         later(1, removeFromChatWindows)
+        later(3, requestRoster)
     else
         channelReady = false
         channelGaveUp = true
@@ -1228,6 +1658,7 @@ function lib.JoinChannel()
     if mine and mine >= LOW_LIMIT then
         channelReady = true
         later(1, removeFromChatWindows)
+        later(3, requestRoster)
         return
     end
     relocate()
@@ -1252,6 +1683,22 @@ if not lib.chatFiltered then
             "CHAT_MSG_CHANNEL_JOIN", "CHAT_MSG_CHANNEL_LEAVE" }) do
             pcall(addFilter, event, chatFilter)
         end
+    end
+end
+
+-- "no such player" after an addon whisper (a copy older than this one may
+-- have set up the filters above, so this one has its own flag)
+if not lib.whisperFiltered then
+    local addFilter = (ChatFrameUtil and ChatFrameUtil.AddMessageEventFilter) or _G.ChatFrame_AddMessageEventFilter
+    if type(addFilter) == "function" then
+        lib.whisperFiltered = true
+        pcall(addFilter, "CHAT_MSG_SYSTEM", function(_, _, msg)
+            if lib.HideWhisperError then
+                local ok, hide = pcall(lib.HideWhisperError, msg)
+                if ok and hide then return true end
+            end
+            return false
+        end)
     end
 end
 
@@ -1284,9 +1731,22 @@ local function counts()
     return nq, nr, nd, ng
 end
 
+local function rosterLine()
+    local age = roster.at and format(T("seconds"), floor(clock() - roster.at)) or "-"
+    local unknown = 0
+    for _, m in ipairs(roster.list) do
+        if m.unknown then unknown = unknown + 1 end
+    end
+    return format(T("roster"), #roster.list, tostring(roster.raw or "-"), tostring(roster.channelCount or "-"),
+        tostring(roster.display or "-"), age, whisperedCount) .. " " .. format(T("unknownFaction"), unknown)
+end
+
 function lib.Slash(msg)
-    msg = type(msg) == "string" and msg:lower():gsub("^%s+", ""):gsub("%s+$", "") or ""
-    if msg == "on" then
+    local raw = type(msg) == "string" and msg:gsub("^%s+", ""):gsub("%s+$", "") or ""
+    msg = raw:lower()
+    if msg == "ping" or msg:find("^ping%s") then
+        lib.Ping((raw:match("^%S+%s+(.+)$")))
+    elseif msg == "on" then
         lib.SetEnabled(true)
         say(T("on"))
     elseif msg == "off" then
@@ -1305,6 +1765,33 @@ function lib.Slash(msg)
         local stats = lib.stats
         say(format(T("traffic"), stats.received, stats.players, stats.sent))
         say(format(T("lastSend"), tostring(stats.note or "-"), #targets()))
+        local parts = {}
+        for way, w in pairs(stats.via or {}) do parts[#parts + 1] = way .. " " .. w.players end
+        if not (stats.via or {}).WHISPER then parts[#parts + 1] = "WHISPER 0" end
+        if type(stats.unlisted) == "table" and stats.unlisted.players > 0 then
+            parts[#parts + 1] = format(T("unlisted"), stats.unlisted.players)
+        end
+        say(format(T("via"), concat(parts, ", ")))
+        parts = {}
+        for way, r in pairs(stats.results or {}) do parts[#parts + 1] = way .. " " .. r end
+        say(format(T("results"), #parts > 0 and concat(parts, ", ") or "-"))
+        say(rosterLine())
+        if (stats.notFound or 0) > 0 then
+            say(format(T("notFound"), stats.notFound) .. " " .. concat(stats.notFoundNames or {}, ", "))
+        end
+    elseif msg == "roster" then
+        requestRoster()
+        say(rosterLine())
+        if roster.why then say(format(T("noRoster"), tostring(roster.why))) end
+        local names = {}
+        for i, m in ipairs(roster.list) do
+            if i > 20 then
+                names[#names + 1] = "..."
+                break
+            end
+            names[#names + 1] = m.name
+        end
+        if #names > 0 then say(format(T("rosterNames"), concat(names, ", "))) end
     else
         say(T("help"))
     end
@@ -1374,6 +1861,11 @@ function lib.OnEvent(event, ...)
         checkUnit("target")
     elseif event == "UPDATE_MOUSEOVER_UNIT" then
         checkUnit("mouseover")
+    elseif event == "CHANNEL_ROSTER_UPDATE" then
+        if readRoster() then releaseHeld() end
+    elseif event == "CHAT_MSG_CHANNEL_JOIN" or event == "CHAT_MSG_CHANNEL_LEAVE" then
+        local _, name, _, _, _, _, _, _, channelBaseName, _, _, guid = ...
+        onChannelMember(event == "CHAT_MSG_CHANNEL_JOIN", name, channelBaseName, guid)
     elseif event == "PLAYER_LOGIN" then
         if C_ChatInfo and C_ChatInfo.RegisterAddonMessagePrefix then
             pcall(C_ChatInfo.RegisterAddonMessagePrefix, PREFIX)
@@ -1420,4 +1912,9 @@ if not lib.events then
             end)
         end
     end
+end
+
+-- events added after the first version (the frame may come from an older copy)
+for _, event in ipairs({ "CHANNEL_ROSTER_UPDATE", "CHAT_MSG_CHANNEL_JOIN", "CHAT_MSG_CHANNEL_LEAVE" }) do
+    pcall(lib.events.RegisterEvent, lib.events, event)
 end

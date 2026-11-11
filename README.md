@@ -58,6 +58,23 @@ WoW Forever (`Interface: 16001`) · `/ezfl` · `/미니게임`
 - 기본 설정에서는 조련사 대화창을 건너뛰고 바로 지도를 엽니다. **Shift**를 누른 채 말을 걸면 대화창이 나옵니다.
 - 세계지도 왼쪽 아래 **2번째 도킹 버튼**을 누르면 얼라이언스(파랑) · 호드(빨강) · 중립(금색) 비행 조련사 표시를 진영별로 켜고 끌 수 있습니다.
 
+### 지도 모양과 지도 표시
+
+지도 아래 왼쪽의 **지도 버튼**을 누를 때마다 지도 모양이 바뀝니다. 고른 모양은 저장됩니다.
+
+| 모양 | 설명 |
+|---|---|
+| 기본 지도 (처음 상태) | 게임 세계 지도의 대륙 그림을 그대로 씁니다. |
+| 자동 | 달에 따라 봄(3~5월) · 여름(6~8월) · 가을(9~11월) · 겨울(12~2월)로 바뀝니다. |
+| 봄 · 여름 · 가을 · 겨울 | 실제 지형 위에 계절 바다와 장식(벚꽃 가지, 야자잎, 단풍 가지, 눈 쌓인 가지)을 그린 지도. 꽃잎 · 반짝임 · 낙엽 · 눈이 천천히 날립니다(`/ezfl fx`로 끄기). |
+| 양피지 | 실제 지형 위에 낡은 종이 질감의 바다를 그린 지도 |
+
+- **지역 이름**: 게임 언어로 표시합니다. 마우스를 올린 지역은 밝게 강조됩니다.
+- **던전 입구**: 던전 아이콘과 이름 · 권장 레벨 이름표를 점선으로 이어 표시합니다.
+- **퀘스트 보고 위치**: 퀘스트 목록에 있는 퀘스트의 보고 위치를 표시합니다(완료하면 노란 물음표, 진행 중이면 회색).
+- 던전·퀘스트 표시를 누르면 가장 가까운 비행 지점을 목록에서 골라 줍니다.
+- 이름표 위치는 `/ezfl edit`로 직접 끌어 옮길 수 있습니다(다시 입력하면 끝, `/ezfl edit reset`은 처음 위치로).
+
 ### 설정창 (`/ezfl config`)
 
 | 번호 | 항목 | 설명 | 기본값 |
@@ -105,6 +122,10 @@ WoW Forever (`Interface: 16001`) · `/ezfl` · `/미니게임`
 | `/ezfl scale 50~120` · `/ezfl alpha 0~70` | 창 크기(%) · 창 투명도(%) |
 | `/ezfl reset` | 창 위치·크기 초기화 |
 | `/ezfl lang <auto\|ko\|en\|de\|fr\|es\|ru\|zhcn\|zhtw>` | 표시 언어 변경 |
+| `/ezfl season <plain\|auto\|spring\|summer\|autumn\|winter\|parchment>` | 지도 모양 바꾸기 (지도 버튼과 같음) |
+| `/ezfl fx` | 계절 효과(꽃잎·낙엽·눈) 켜기/끄기 |
+| `/ezfl edit` · `/ezfl edit reset` | 이름표 위치 옮기기 켜기/끄기 · 처음 위치로 |
+| `/ezfl preview ek` · `/ezfl preview kal` | 비행 조련사 없이 대륙 비행 지도 보기 (비행은 안 됨) |
 | `/ezfl donate` | 후원 주소 보기 |
 
 ### 저장 데이터
@@ -171,6 +192,23 @@ When you talk to a flight master (gryphon, wyvern, bat or hippogryph), Flight Ma
 - By default the gossip window is skipped and the map opens at once. Hold **Shift** while talking to see the gossip.
 - The **2nd dock button** at the bottom-left of the World Map toggles Alliance (blue), Horde (red) and Neutral (gold) flight masters separately.
 
+### Map look and map markers
+
+Click the **map button** at the bottom left under the map to change the look. Your choice is saved.
+
+| Look | Description |
+|---|---|
+| Game map (default) | The game's own continent map picture. |
+| Auto | Changes with the month: spring (Mar-May), summer (Jun-Aug), autumn (Sep-Nov), winter (Dec-Feb). |
+| Spring · Summer · Autumn · Winter | The real terrain with a seasonal sea and a corner decoration (cherry blossom, palm leaves, maple branch, snowy branch). Petals, glints, leaves or snow drift slowly over the map (`/ezfl fx` turns them off). |
+| Parchment | The real terrain with an old paper sea. |
+
+- **Zone names** in your game language; the zone under the cursor is highlighted.
+- **Dungeon entrances** with a name and level label joined by a dotted line.
+- **Quest turn-ins** for quests in your quest log (yellow when complete, grey while in progress).
+- Clicking a dungeon or quest marker selects the nearest flight point in the list.
+- Labels can be moved by hand with `/ezfl edit` (type it again to finish; `/ezfl edit reset` restores the default spots).
+
 ### Settings window (`/ezfl config`)
 
 | No. | Option | Description | Default |
@@ -218,6 +256,10 @@ When you talk to a flight master (gryphon, wyvern, bat or hippogryph), Flight Ma
 | `/ezfl scale 50-120` · `/ezfl alpha 0-70` | Window size (%) · transparency (%) |
 | `/ezfl reset` | Reset window position and size |
 | `/ezfl lang <auto\|ko\|en\|de\|fr\|es\|ru\|zhcn\|zhtw>` | Change display language |
+| `/ezfl season <plain\|auto\|spring\|summer\|autumn\|winter\|parchment>` | Change the map look (same as the map button) |
+| `/ezfl fx` | Toggle the season effects (petals, leaves, snow) |
+| `/ezfl edit` · `/ezfl edit reset` | Toggle moving labels by hand · restore default spots |
+| `/ezfl preview ek` · `/ezfl preview kal` | Look at a continent's flight map without a flight master (no flying) |
 | `/ezfl donate` | Show the support link |
 
 ### Saved data

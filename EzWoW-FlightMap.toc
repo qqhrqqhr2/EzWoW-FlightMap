@@ -34,6 +34,7 @@ Core\UIKit.lua
 Core\Locales.lua
 Core\WorldMapDock.lua
 Data\RouteDistances.lua
+Data\ZoneLabels.lua
 Modules\FlightRouteEngine.lua
 UI\FlightBar.lua
 Libs\EzWoWMiniGames\MiniGames.lua
@@ -41,6 +42,7 @@ Libs\EzWoWMiniGames\Games\Minesweeper.lua
 Libs\EzWoWMiniGames\Games\Memory.lua
 Libs\EzWoWMiniGames\Games\Puzzle.lua
 Libs\EzWoWMiniGames\Games\Solitaire.lua
+UI\FlightMapExtras.lua
 UI\FlightMapWindow.lua
 UI\LanguageDropdown.lua
 UI\OptionsWindow.lua

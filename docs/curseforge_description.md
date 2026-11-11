@@ -24,6 +24,11 @@ When you talk to a flight master (gryphon, wyvern, bat or hippogryph), a dedicat
 - Your current location is green with a pulse; undiscovered and unconnected points are shown faded (optional).
 - Drag the title to move the window, **Ctrl + mouse wheel** to resize. Option to zoom into the area that has flight points.
 
+### Map look
+- Starts with the game's own continent map. The map button under the map switches to **Auto** (changes with the month), **Spring**, **Summer**, **Autumn**, **Winter** or **Parchment**.
+- The seasonal maps show the real terrain with a seasonal sea and a corner decoration, with petals, glints, leaves or snow drifting gently over the map.
+- Zone names in your game language with a zone highlight, dungeon entrances with level ranges, and quest turn-in spots for your quest log. Click a marker to pick the nearest flight point.
+
 ### Destination list
 - Search by part of a name; **Enter** flies to the first reachable result.
 - Sort by name, time or fare. Star (★) favourites, and the place you last flew to from this flight master, stay on top.
@@ -62,6 +67,8 @@ When you talk to a flight master (gryphon, wyvern, bat or hippogryph), a dedicat
 - `/ezfl bar` · `alert` · `soon [5-120]` — toggle the timer bar, arrival alert, landing-soon alert (and its seconds)
 - `/ezfl scale 50-120` · `alpha 0-70` · `reset` — window size, transparency, reset positions
 - `/ezfl lang <auto|ko|en|de|fr|es|ru|zhcn|zhtw>` — display language
+- `/ezfl season <plain|auto|spring|summer|autumn|winter|parchment>` · `fx` — map look, season effects on/off
+- `/ezfl edit` · `edit reset` — move labels by hand, restore default spots
 - `/ezgames` (`/미니게임`) — open or close the mini games
 
 Languages: English, 한국어, Deutsch, Français, Español, Русский, 简体中文, 繁體中文.
@@ -86,6 +93,11 @@ Languages: English, 한국어, Deutsch, Français, Español, Русский, 简
 - 목적지에 마우스를 올리면 경로선과 이동 방향 빛, 요금, 소요 시간, 경유지 수가 나옵니다. 클릭하면 비행하고, 출발 전 확인 창을 켤 수도 있습니다.
 - 현재 위치는 초록색과 파동으로, 미발견·미연결 지점은 흐리게 표시합니다(선택).
 - 제목 줄을 끌어 이동, **Ctrl + 마우스 휠**로 크기 조절. 비행 지점이 있는 부분만 크게 보는 옵션.
+
+### 지도 모양
+- 처음에는 게임 세계 지도의 대륙 그림을 씁니다. 지도 아래 버튼으로 **자동**(달마다 계절), **봄**, **여름**, **가을**, **겨울**, **양피지**로 바꿀 수 있습니다.
+- 계절 지도는 실제 지형에 계절 바다와 모서리 장식을 그리고, 꽃잎 · 반짝임 · 낙엽 · 눈이 은은하게 날립니다.
+- 게임 언어의 지역 이름과 지역 강조, 던전 입구와 권장 레벨, 퀘스트 목록의 보고 위치를 지도에 표시합니다. 표시를 누르면 가장 가까운 비행 지점을 골라 줍니다.
 
 ### 목적지 목록
 - 이름 일부로 검색하고 **Enter**를 누르면 첫 번째 비행 가능 목적지로 출발합니다.
@@ -125,6 +137,8 @@ Languages: English, 한국어, Deutsch, Français, Español, Русский, 简
 - `/ezfl bar` · `alert` · `soon [5~120]` — 남은 시간 막대, 도착 알림, 착륙 직전 알림(몇 초 전인지) 설정
 - `/ezfl scale 50~120` · `alpha 0~70` · `reset` — 창 크기, 투명도, 위치 초기화
 - `/ezfl lang <auto|ko|en|de|fr|es|ru|zhcn|zhtw>` — 표시 언어 변경
+- `/ezfl season <plain|auto|spring|summer|autumn|winter|parchment>` · `fx` — 지도 모양, 계절 효과 켜기/끄기
+- `/ezfl edit` · `edit reset` — 이름표 위치 직접 옮기기, 처음 위치로
 - `/미니게임` (`/ezgames`) — 미니게임 창 열기/닫기
 
 지원 언어: English, 한국어, Deutsch, Français, Español, Русский, 简体中文, 繁體中文.
