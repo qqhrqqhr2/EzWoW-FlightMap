@@ -810,6 +810,11 @@ end
 -- not matter. ns.LABEL_SPOTS (Data/ZoneLabels.lua) holds the built-in ones.
 Extras.editMode = false
 
+-- how far apart (in 1/1000 of the continent) two position keys of the same
+-- flight point can be: the preview and the real map differ by up to ~10,
+-- different flight points are 13 or more apart
+local SPOT_NEAR = 10
+
 local function spotTable(mapID, create)
     if create then
         ns.DB.labelPos = type(ns.DB.labelPos) == "table" and ns.DB.labelPos or {}
@@ -824,8 +829,38 @@ function Extras.SavedSpotView(st, key)
     if not (st and num(st.mapID) and num(st.s) and num(st.W) and num(st.H)) then return nil end
     local own = spotTable(st.mapID)
     local builtIn = type(ns.LABEL_SPOTS) == "table" and ns.LABEL_SPOTS[st.mapID] or nil
-    local p = own and own[key]
+    -- a flight point: "n<nodeID>|f<x>:<y>" (see FlightLabelKey). The node ID
+    -- is the same in the preview and on the real flight map; the position is
+    -- not quite (the preview takes the continent positions as they are, the
+    -- real map converts its own), so older spots saved by position are found
+    -- by the nearest one
+    local nodeKey, posKey = key:match("^(n%d+)|(f%d+:%d+)$")
+    if nodeKey then key = posKey end
+    local p
+    if nodeKey then
+        p = own and own[nodeKey]
+        if type(p) ~= "table" then p = type(builtIn) == "table" and builtIn[nodeKey] or nil end
+    end
+    if type(p) ~= "table" then p = own and own[key] end
     if type(p) ~= "table" then p = type(builtIn) == "table" and builtIn[key] or nil end
+    local fx, fy = key:match("^f(%d+):(%d+)$")
+    if type(p) ~= "table" and fx then
+        fx, fy = tonumber(fx), tonumber(fy)
+        local best, bestD
+        for _, t in ipairs({ own or {}, builtIn or {} }) do
+            for k, v in pairs(t) do
+                local x, y = k:match("^f(%d+):(%d+)$")
+                if x and type(v) == "table" then
+                    local dx, dy = abs(tonumber(x) - fx), abs(tonumber(y) - fy)
+                    if dx <= SPOT_NEAR and dy <= SPOT_NEAR and (not bestD or dx + dy < bestD) then
+                        best, bestD = v, dx + dy
+                    end
+                end
+            end
+            if best then break end
+        end
+        p = best
+    end
     -- a dungeon spot a little off (the client's entrance spot can differ by a hair)
     local kx, ky, kn = key:match("^D(%d+):(%d+):(%d+)$")
     if type(p) ~= "table" and kx then
@@ -849,15 +884,76 @@ local function savedSpot(key)
 end
 
 -- the key of a flight point label: its spot on the continent
-function Extras.FlightLabelKey(node)
+-- The game's own list of a continent's flight points (the one the preview
+-- shows): the real flight map converts its positions from the flight
+-- master's map, which can land a little elsewhere, so the label key is made
+-- from this list's position (found by node ID, else by name) on both maps.
+local continentNodes = {}
+local function continentPosition(mapID, node)
+    if not (num(mapID) and C_TaxiMap and C_TaxiMap.GetTaxiNodesForMap) then return nil end
+    local list = continentNodes[mapID]
+    if list == nil then
+        list = { byID = {}, byName = {}, dupName = {} }
+        local ok, nodes = call(C_TaxiMap.GetTaxiNodesForMap, mapID)
+        for _, info in ipairs(ok and type(nodes) == "table" and nodes or {}) do
+            local x, y = vecXY(type(info) == "table" and info.position)
+            if num(x) and num(y) then
+                if num(info.nodeID) and info.nodeID > 0 then list.byID[info.nodeID] = { x, y } end
+                if type(info.name) == "string" then
+                    if list.byName[info.name] then list.dupName[info.name] = true end
+                    list.byName[info.name] = { x, y }
+                end
+            end
+        end
+        -- an empty answer (not loaded yet) is asked again next time
+        if next(list.byID) or next(list.byName) then continentNodes[mapID] = list end
+    end
+    local p = num(node.nodeID) and list.byID[node.nodeID]
+    if not p and type(node.name) == "string" and not list.dupName[node.name] then p = list.byName[node.name] end
+    if p then return p[1], p[2] end
+    return nil
+end
+
+-- how many flight point labels the continent's preview shows (its label
+-- font size depends on it)
+function Extras.PreviewLabelCount(mapID)
+    if not num(mapID) then return nil end
+    continentPosition(mapID, {})
+    local list = continentNodes[mapID]
+    if not list then return nil end
+    local n = 0
+    for name in pairs(list.byName) do
+        if not name:lower():match("^%s*zzold") then n = n + 1 end
+    end
+    for name in pairs(list.dupName) do n = n + 1 end
+    return n > 0 and n or nil
+end
+
+function Extras.FlightLabelKey(node, mapID)
     if not (node and num(node.x) and num(node.y)) then return nil end
-    return "f" .. floor(node.x * 1000) .. ":" .. floor(node.y * 1000)
+    local x, y = continentPosition(mapID, node)
+    if not x then x, y = node.x, node.y end
+    local posKey = "f" .. floor(x * 1000) .. ":" .. floor(y * 1000)
+    if num(node.nodeID) and node.nodeID > 0 then return "n" .. node.nodeID .. "|" .. posKey end
+    return posKey
 end
 
 local function saveSpot(key, x, y)
     local t = spotTable(ctx.mapID, true)
     local nx = (x / ctx.s + ctx.cx0) / ctx.W
     local ny = (y / ctx.s + ctx.cy0) / ctx.H
+    -- a flight point is saved under its node ID; records of the same point
+    -- by position (older ones, or a hair off between preview and real map) go
+    local nodeKey, posKey = key:match("^(n%d+)|(f%d+:%d+)$")
+    if nodeKey then key = nodeKey end
+    local fx, fy = (posKey or key):match("^f(%d+):(%d+)$")
+    if fx then
+        fx, fy = tonumber(fx), tonumber(fy)
+        for k in pairs(t) do
+            local x2, y2 = k:match("^f(%d+):(%d+)$")
+            if x2 and k ~= key and abs(tonumber(x2) - fx) <= SPOT_NEAR and abs(tonumber(y2) - fy) <= SPOT_NEAR then t[k] = nil end
+        end
+    end
     t[key] = { floor(nx * 10000 + 0.5) / 10000, floor(ny * 10000 + 0.5) / 10000 }
 end
 
@@ -925,7 +1021,9 @@ end
 -- drag a label that takes the mouse itself (flight point labels): follows the
 -- cursor until the left button is let go, then the spot is saved
 local dragFrame
-function Extras.BeginDrag(x, y, w, h, key, place)
+-- centerOf(x, y, w, h): optional, the spot to save for the label's final
+-- top-left (default: its center)
+function Extras.BeginDrag(x, y, w, h, key, place, centerOf)
     if not (ctx and markerLayer and Extras.editMode and key and place) then return end
     local mx, my = cursorInCanvas()
     local d = { x = x, y = y, gx = mx - x, gy = my - y }
@@ -938,7 +1036,11 @@ function Extras.BeginDrag(x, y, w, h, key, place)
         place(d.x, d.y)
         if not IsMouseButtonDown("LeftButton") then
             f:SetScript("OnUpdate", nil)
-            saveSpot(key, d.x + w / 2, d.y + h / 2)
+            if centerOf then
+                saveSpot(key, centerOf(d.x, d.y, w, h))
+            else
+                saveSpot(key, d.x + w / 2, d.y + h / 2)
+            end
             if ns.ScheduleRender then ns.ScheduleRender() end
         end
     end)

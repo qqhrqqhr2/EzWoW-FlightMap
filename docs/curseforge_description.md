@@ -19,7 +19,7 @@ When you talk to a flight master (gryphon, wyvern, bat or hippogryph), a dedicat
 
 ### Flight map
 - Opens straight away when you talk to a flight master (hold **Shift** to see the gossip window instead).
-- Short one-line labels under each flight point: name and flight time. Fare and zone show on hover. Prefer more detail? Switch to three-line labels with name, zone, fare and time.
+- Short one-line labels beside each flight point with the name. Flight time, fare and zone show on hover, and the time is also in the list. Prefer more detail? Switch to three-line labels with name, zone, fare and time.
 - Hover a destination to see the route with a moving light, the fare, the flight time and the number of stops. Click to fly, or turn on a confirmation window first.
 - Your current location is green with a pulse; undiscovered and unconnected points are shown faded (optional).
 - Drag the title to move the window, **Ctrl + mouse wheel** to resize. Option to zoom into the area that has flight points.
@@ -89,7 +89,7 @@ Languages: English, 한국어, Deutsch, Français, Español, Русский, 简
 
 ### 비행 지도
 - 비행 조련사에게 말을 걸면 바로 열립니다(**Shift**를 누른 채 말을 걸면 대화창).
-- 비행 지점 아래에 한 줄 이름표(이름 · 소요 시간). 요금과 지역은 마우스를 올리면 나옵니다. 설정에서 이름 · 지역 · 요금 · 시간의 세 줄 이름표로 바꿀 수 있습니다.
+- 비행 지점 옆에 한 줄 이름표(이름). 소요 시간·요금·지역은 마우스를 올리면 나오고, 시간은 오른쪽 목록에도 나옵니다. 설정에서 이름 · 지역 · 요금 · 시간의 세 줄 이름표로 바꿀 수 있습니다.
 - 목적지에 마우스를 올리면 경로선과 이동 방향 빛, 요금, 소요 시간, 경유지 수가 나옵니다. 클릭하면 비행하고, 출발 전 확인 창을 켤 수도 있습니다.
 - 현재 위치는 초록색과 파동으로, 미발견·미연결 지점은 흐리게 표시합니다(선택).
 - 제목 줄을 끌어 이동, **Ctrl + 마우스 휠**로 크기 조절. 비행 지점이 있는 부분만 크게 보는 옵션.

@@ -32,7 +32,7 @@ local ADDON_NAME, ns = ...
 local type, pairs, ipairs, tonumber, tostring, pcall, next = type, pairs, ipairs, tonumber, tostring, pcall, next
 local floor, format, concat, max, min = math.floor, string.format, table.concat, math.max, math.min
 
-local LIB_VERSION = 5
+local LIB_VERSION = 6
 
 -- one table for every copy (a newer copy updates the functions in it)
 local lib = _G.EzWoW_Share
@@ -1035,8 +1035,11 @@ local function serverOf(guid)
     return guid:match("^Player%-(%d+)%-")
 end
 
-local UNREACHABLE_FOR = 600     -- seconds a player not found is left off the list
+-- a player not found is left off the list for a while, longer each time
+-- in a row: 10 minutes, then an hour, then for the rest of the session
+local UNREACHABLE_FOR = { 600, 3600, math.huge }
 local unreachable = {}          -- base name -> time until left off (this session)
+local unreachableCount = {}     -- base name -> "not found" in a row (this session)
 
 local myKey, myServer, myFaction
 local function learnMe()
@@ -1187,6 +1190,11 @@ lib.RequestRoster = requestRoster
 
 local function onChannelMember(joined, name, channelName, guid)
     if type(channelName) ~= "string" or isSecret(channelName) or channelName:lower() ~= CHANNEL_NAME:lower() then return end
+    -- a player who (re)joined the channel is online again: whispers may reach them
+    if joined then
+        local key = baseName(name)
+        if key then unreachableCount[key] = nil; unreachable[key] = nil end
+    end
     local m = member(name, guid)
     if not m then return end
     if not joined then
@@ -1281,6 +1289,9 @@ end
 accept = function(text, channel, sender)
     local version, kind, payload = text:match("^(%d)(%u)|(.+)$")
     if not kind or not payload then return end
+    -- a player heard from is reachable again
+    local fromKey = baseName(sender)
+    if fromKey and unreachableCount[fromKey] then unreachableCount[fromKey] = nil; unreachable[fromKey] = nil end
     if not ((version == "1" and V1_KINDS[kind]) or (version == "2" and (V2_KINDS[kind] or lib.kinds[kind]))) then return end
     local hash = senderHash(sender)
     local stats = lib.stats
@@ -1502,7 +1513,11 @@ function lib.HideWhisperError(msg)
             local m = key and roster.byKey[key]
             names[#names + 1] = (m and m.unknown) and (name .. "(?)") or name
             if #names > 5 then table.remove(names, 1) end
-            if key then unreachable[key] = clock() + UNREACHABLE_FOR end
+            if key then
+                local n = (unreachableCount[key] or 0) + 1
+                unreachableCount[key] = n
+                unreachable[key] = clock() + UNREACHABLE_FOR[math.min(n, #UNREACHABLE_FOR)]
+            end
             removeMember(key)
             return true
         end

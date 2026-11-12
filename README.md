@@ -15,7 +15,7 @@ WoW Forever (`Interface: 16001`) · `/ezfl` · `/미니게임`
 
 ### 개요
 
-비행 조련사(그리폰·와이번·박쥐·히포그리프)와 대화하면 기본 비행 지도 대신 **전용 비행 지도**를 엽니다. 목적지마다 **이름 · 소요 시간**을 한 줄 이름표로 보여 주고(요금·지역은 마우스를 올리면 표시, 설정에서 세 줄 이름표로 바꿀 수 있음), 마우스를 올리면 비행 경로가 강조됩니다. 오른쪽 목적지 목록에서 검색·정렬·즐겨찾기를 할 수 있고, 비행 중에는 남은 시간 막대와 미니게임을, 세계지도에는 진영별 비행 조련사 위치를 보여 줍니다.
+비행 조련사(그리폰·와이번·박쥐·히포그리프)와 대화하면 기본 비행 지도 대신 **전용 비행 지도**를 엽니다. 목적지마다 **이름**을 한 줄 이름표로 보여 주고(소요 시간·요금·지역은 마우스를 올린 툴팁과 오른쪽 목록에 표시, 설정에서 세 줄 이름표로 바꿀 수 있음), 마우스를 올리면 비행 경로가 강조됩니다. 오른쪽 목적지 목록에서 검색·정렬·즐겨찾기를 할 수 있고, 비행 중에는 남은 시간 막대와 미니게임을, 세계지도에는 진영별 비행 조련사 위치를 보여 줍니다.
 
 > 자세한 사용 설명서: [한국어](docs/USER_GUIDE-koKR.md) · [English](docs/USER_GUIDE-enUS.md)
 
@@ -38,7 +38,7 @@ WoW Forever (`Interface: 16001`) · `/ezfl` · `/미니게임`
 | 번호 | 부분 | 설명 |
 |---|---|---|
 | ① | 제목 줄 버튼 | 톱니바퀴: 설정창, 목록 아이콘: 오른쪽 목적지 목록 켜기/끄기, X: 닫기. 제목 줄을 끌어 창을 옮기고 **Ctrl + 마우스 휠**로 크기를 바꿉니다. |
-| ② | 목적지 이름표 | 기본은 비행 지점 바로 아래의 **한 줄 이름표**(이름 · 소요 시간)입니다. 요금과 지역은 마우스를 올리면 툴팁에 나오고, 마우스를 올린 이름표는 겹친 이름표보다 앞으로 나옵니다. 설정에서 **이름표 한 줄로 간단히**를 끄면 이름 · 지역 · 요금(금·은·동) · 소요 시간의 세 줄 이름표가 서로 겹치지 않게 자동 배치됩니다. 현재 위치는 초록색으로 표시됩니다. |
+| ② | 목적지 이름표 | 기본은 비행 지점 옆의 **한 줄 이름표**(이름)입니다. 소요 시간·요금·지역은 마우스를 올리면 툴팁에 나오고(시간은 오른쪽 목록에도 나옴), 마우스를 올린 이름표는 겹친 이름표보다 앞으로 나옵니다. 설정에서 **이름표 한 줄로 간단히**를 끄면 이름 · 지역 · 요금(금·은·동) · 소요 시간의 세 줄 이름표가 서로 겹치지 않게 자동 배치됩니다. 현재 위치는 초록색으로 표시됩니다. |
 | ③ | 검색 | 이름 일부를 입력하면 목록이 걸러집니다. **Enter**를 누르면 첫 번째 비행 가능 목적지로 바로 출발합니다. |
 | ④ | 정렬 · 즐겨찾기 | 이름/시간/요금 정렬. 별(★)을 누르면 즐겨찾기가 되고, 즐겨찾기와 이 조련사에서 **최근** 간 곳은 맨 위에 고정됩니다. 소지금보다 비싼 곳은 빨간색입니다. |
 | ⑤ | 경로 강조 · 툴팁 | 목적지에 마우스를 올리면 경로선과 이동 방향 빛 애니메이션, 경유지 수, 요금, 시간이 나옵니다. 클릭하면 비행합니다. |
@@ -86,7 +86,7 @@ WoW Forever (`Interface: 16001`) · `/ezfl` · `/미니게임`
 | ③ | 세계지도에 진영별 비행 조련사 표시 | 얼라이언스 / 호드 / 중립 각각 선택 | 켬 |
 | ③ | 세계지도 하단 버튼 자동 정렬 | 좌하단 도킹 | 켬 |
 | ④ | 목적지 이름·요금·시간 표시 | 지도 이름표 | 켬 |
-| ④ | 이름표 한 줄로 간단히 (이름·시간, 요금은 마우스를 올리면) | 끄면 이름·지역·요금·시간의 세 줄 이름표 | 켬 |
+| ④ | 이름표 한 줄로 간단히 (이름만, 시간·요금은 마우스를 올리면) | 끄면 이름·지역·요금·시간의 세 줄 이름표 | 켬 |
 | ④ | 비행 지점 부분만 크게 보기 | 비행 지점이 있는 부분만 확대 | 끔 |
 | ④ | 미발견·미연결 비행 지점도 표시 | 흐린 아이콘으로 표시 | 켬 |
 | ④ | 목적지 목록 표시 | 검색·정렬·즐겨찾기 목록 | 켬 |
@@ -149,7 +149,7 @@ WoW Forever (`Interface: 16001`) · `/ezfl` · `/미니게임`
 
 ### Overview
 
-When you talk to a flight master (gryphon, wyvern, bat or hippogryph), Flight Map opens a **dedicated flight map** instead of the default one. Each destination gets a short one-line label with **name · flight time** (fare and zone show on hover; a three-line label is available in the settings), and hovering highlights the route. The list on the right supports search, sorting and favourites; during the flight a timer bar shows the remaining time and mini games keep you busy, and the World Map can show flight masters by faction.
+When you talk to a flight master (gryphon, wyvern, bat or hippogryph), Flight Map opens a **dedicated flight map** instead of the default one. Each destination gets a short one-line label with its **name** (flight time, fare and zone show in the tooltip on hover and the time also in the list; a three-line label is available in the settings), and hovering highlights the route. The list on the right supports search, sorting and favourites; during the flight a timer bar shows the remaining time and mini games keep you busy, and the World Map can show flight masters by faction.
 
 > Full user guide: [한국어](docs/USER_GUIDE-koKR.md) · [English](docs/USER_GUIDE-enUS.md)
 
@@ -172,7 +172,7 @@ When you talk to a flight master (gryphon, wyvern, bat or hippogryph), Flight Ma
 | No. | Part | Description |
 |---|---|---|
 | ① | Title buttons | Gear: settings, list icon: toggle the destination list, X: close. Drag the title to move, **Ctrl + mouse wheel** to resize. |
-| ② | Destination labels | By default a **one-line label** (name · flight time) right under each flight point. Fare and zone show in the tooltip on hover, and the hovered label comes to the front of any it overlaps. Untick **Short one-line labels** in the settings for three-line labels (name · zone · fare (g/s/c) · time) that are placed so they do not overlap. Your current location is green. |
+| ② | Destination labels | By default a **one-line label** (name) beside each flight point. Flight time, fare and zone show in the tooltip on hover (the time also in the list), and the hovered label comes to the front of any it overlaps. Untick **Short one-line labels** in the settings for three-line labels (name · zone · fare (g/s/c) · time) that are placed so they do not overlap. Your current location is green. |
 | ③ | Search | Type part of a name to filter. **Enter** flies to the first reachable result. |
 | ④ | Sort · favourites | Sort by name, time or fare. Click the star (★) to favourite; favourites and the **Recent** destination for this flight master stay on top. Destinations you cannot afford are red. |
 | ⑤ | Route highlight · tooltip | Hover a destination to see the path with a moving light, number of stops, fare and time. Click to fly. |
@@ -220,7 +220,7 @@ Click the **map button** at the bottom left under the map to change the look. Yo
 | ③ | Show flight masters by faction on the world map | Alliance / Horde / Neutral individually | On |
 | ③ | Auto-align world map button (Bottom-Left Dock) | Dock alignment | On |
 | ④ | Show destination name, cost and time | Map labels | On |
-| ④ | Short one-line labels (name and time; cost on hover) | Off = three-line labels with name, zone, fare and time | On |
+| ④ | Short one-line labels (name; time and cost on hover) | Off = three-line labels with name, zone, fare and time | On |
 | ④ | Zoom to flight points | Zoom into the area that has flight points | Off |
 | ④ | Show undiscovered and unconnected points | Shown as faded icons | On |
 | ④ | Show destination list | Search / sort / favourites list | On |

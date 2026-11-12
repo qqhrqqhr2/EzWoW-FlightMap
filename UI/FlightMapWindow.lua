@@ -605,13 +605,18 @@ function FlightMapWindow.buildLabel()
     -- edit mode (/ezfl edit): the label itself is dragged to a new spot
     lb.frame:SetScript("OnMouseDown", function(self, button)
         if button ~= "LeftButton" or not (Extras and Extras.editMode and Extras.BeginDrag) then return end
-        local key = lb.layoutKey or (Extras.FlightLabelKey and Extras.FlightLabelKey(lb.node))
+        local key = lb.layoutKey or (Extras.FlightLabelKey and Extras.FlightLabelKey(lb.node, currentState.art and currentState.art.mapID))
         if not (key and lb.layoutX) then return end
         local w, h = self:GetSize()
+        local function centerOf(x, y, bw, bh)
+            local base = math.min(lb.baseW or bw, bw)
+            if lb.pinX and x + bw / 2 < lb.pinX then return x + bw - base / 2, y + bh / 2 end
+            return x + base / 2, y + bh / 2
+        end
         Extras.BeginDrag(lb.layoutX, lb.layoutY, w or 0, h or 0, key, function(x, y)
             self:ClearAllPoints()
             self:SetPoint("TOPLEFT", labelOverlayLayer, "TOPLEFT", x, -y)
-        end)
+        end, centerOf)
     end)
     lb.frame:SetScript("OnHide", FlightMapWindow.pinOnleave)
     lb.accent = lb.frame:CreateTexture(nil, "ARTWORK")
@@ -687,6 +692,15 @@ function FlightMapWindow.layoutNonOverlappingLabels(shown)
     end)
     local size=ns.DB.labelSize or 12
     while size>8 and #shown*(size*16+16)*(size*3+10)>vwVal*vhVal*.55 do size=size-1 end
+    -- the preview shows every flight point, so its font can be smaller: saved
+    -- spots were set at that size, and the name-alone width is measured at it
+    local previewSize=size
+    local nPreview=(not currentState.preview) and currentState.art and Extras and Extras.PreviewLabelCount
+        and Extras.PreviewLabelCount(currentState.art.mapID) or nil
+    if nPreview and nPreview>#shown then
+        previewSize=ns.DB.labelSize or 12
+        while previewSize>8 and nPreview*(previewSize*16+16)*(previewSize*3+10)>vwVal*vhVal*.55 do previewSize=previewSize-1 end
+    end
     
     -- one-line labels: name and time only (cost and zone on hover), set right next to the pin
     local compact=ns.DB.labelCompact~=false
@@ -707,13 +721,17 @@ function FlightMapWindow.layoutNonOverlappingLabels(shown)
         local destination,region=FlightMapWindow.splitDestinationName(node.name)
         if FlightMapWindow.hasFavorite(node) then destination=STAR_INLINE..destination end
         if compact then
+            -- the name only on the map (as in the preview): the flight time is
+            -- in the tooltip and the destination list
             local extra=""
             if node.type=="CURRENT" then
                 extra="  |cff8cffa6"..L.CURRENT.."|r"
-            elseif node.type=="REACHABLE" then
-                local sec,recorded=estimateFlightDuration(node)
-                if sec then extra="  |cffd9dbe0"..composeTime(sec,not recorded).."|r" end
             end
+            -- the name alone (as in the preview): saved spots are kept for this width
+            lb.name:SetWidth(0);lb.name:SetText(destination)
+            if previewSize~=size then assignFontSize(lb.name,previewSize) end
+            item.baseW=lb.name:GetStringWidth()+12
+            if previewSize~=size then assignFontSize(lb.name,size) end
             lb.name:SetText(destination..extra);lb.region:SetText("");lb.info:SetText("")
         else
             lb.name:SetText(destination);lb.region:SetText(region);lb.info:SetText(FlightMapWindow.resolveDestinationInfo(node,size))
@@ -988,12 +1006,22 @@ function FlightMapWindow.placeCallouts(order, vwVal, vhVal)
             mapID = art.mapID, s = currentState.s, cx0 = currentState.cx0, cy0 = currentState.cy0, W = currentState.W, H = currentState.H,
         }
         for _, item in ipairs(col) do
-            item.key = view and item.lb and Extras.FlightLabelKey(item.lb.node) or nil
+            item.key = view and item.lb and Extras.FlightLabelKey(item.lb.node, view.mapID) or nil
             local sx, sy
             if item.key then sx, sy = Extras.SavedSpotView(view, item.key) end
             if sx then
-                item.lx, item.ly = sx - item.w / 2, sy - item.h / 2
-                item.side = sx < item.px and "left" or "right"
+                -- the spot is the center of the label with the name alone: the
+                -- edge next to the pin stays, a longer label (with the flight
+                -- time) grows away from the pin instead of over it
+                local bw = math.min(item.baseW or item.w, item.w)
+                if sx < item.px then
+                    item.lx = sx + bw / 2 - item.w
+                    item.side = "left"
+                else
+                    item.lx = sx - bw / 2
+                    item.side = "right"
+                end
+                item.ly = sy - item.h / 2
             end
         end
         for _, item in ipairs(col) do
@@ -1001,6 +1029,7 @@ function FlightMapWindow.placeCallouts(order, vwVal, vhVal)
             local lb, w, h, x, y0 = item.lb, item.w, item.h, item.lx, item.ly
             lb.layoutKey = item.key
             lb.layoutX, lb.layoutY = x, y0
+            lb.pinX, lb.baseW = item.px, item.baseW
             lb.frame:ClearAllPoints(); lb.frame:SetPoint("TOPLEFT", labelOverlayLayer, "TOPLEFT", x, -y0)
             lb.frame:SetSize(w, h); lb.frame:SetFrameLevel(labelOverlayLayer:GetFrameLevel() + 1)
             for _, labelRegion in ipairs({ lb.name, lb.region, lb.info }) do
@@ -1553,6 +1582,18 @@ end
 -- Look at a continent's flight map without a flight master (no flying):
 -- every known flight point of the continent, shown as not reachable.
 local PREVIEW_MAPS = { ek = 1415, eastern = 1415, ["동부"] = 1415, kal = 1414, kalimdor = 1414, ["칼림도어"] = 1414 }
+-- Escape closes the preview: it has no flight master window for the game to
+-- close, so the frame is listed with the game's escape-closable windows only
+-- while the preview is open (the real map follows the flight master window)
+local PREVIEW_ESC_NAME = "EzWoWFlightMapFrame"
+local function setPreviewEscape(on)
+    if type(UISpecialFrames) ~= "table" then return end
+    for i = #UISpecialFrames, 1, -1 do
+        if UISpecialFrames[i] == PREVIEW_ESC_NAME then table.remove(UISpecialFrames, i) end
+    end
+    if on then tinsert(UISpecialFrames, PREVIEW_ESC_NAME) end
+end
+
 function FlightMapWindow.openPreview(which)
     local mapID = PREVIEW_MAPS[(which or ""):lower()] or tonumber(which) or 1414
     if not (C_TaxiMap and C_TaxiMap.GetTaxiNodesForMap) then return false end
@@ -1568,7 +1609,8 @@ function FlightMapWindow.openPreview(which)
         end
         if type(info.name) == "string" and x and y then
             local slot = #s.list + 1
-            local rec = { slot = slot, type = "DISTANT", tx = x, ty = y, name = info.name }
+            local rec = { slot = slot, type = "DISTANT", tx = x, ty = y, name = info.name,
+                nodeID = (type(info.nodeID) == "number" and info.nodeID > 0) and info.nodeID or nil }
             s.bySlot[slot] = rec
             s.list[slot] = rec
         end
@@ -1577,6 +1619,7 @@ function FlightMapWindow.openPreview(which)
     ns.snap = s
     currentState.open, currentState.preview = true, true
     FlightMapWindow.openMainWindow()
+    setPreviewEscape(true)
     return mainWindowFrame ~= nil and mainWindowFrame:IsShown()
 end
 
@@ -1658,6 +1701,14 @@ function FlightMapWindow.buildUI()
         FlightMapWindow.persistPosition()
     end)
     mainWindowFrame:SetScript("OnHide", function()
+        setPreviewEscape(false)
+        -- the preview hidden by Escape: leave preview mode as its X button does
+        if currentState.preview then
+            currentState.open, currentState.preview = false, nil
+            C_Timer.After(0, function()
+                if not currentState.preview and not currentState.open then FlightMapWindow.closeActiveWindow() end
+            end)
+        end
         if ns.CloseSettingsPopup then ns.CloseSettingsPopup() end
         FlightMapWindow.resetHover()
         if flightConfirmDialog then flightConfirmDialog:Hide() end
@@ -1997,6 +2048,7 @@ eventFrame:SetScript("OnEvent", function(_, event, arg1)
             hookPreMask("FlightMapFrame")
         end
     elseif event == "TAXIMAP_OPENED" then
+        setPreviewEscape(false)
         if currentState.preview then
             currentState.preview = nil
             FlightMapWindow.closeActiveWindow()
