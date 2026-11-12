@@ -1,17 +1,13 @@
-# v2.0.11
+# v2.0.12
 
 ### 한국어
-- 비행 지도에 지역 이름, 지역 강조, 던전 입구와 권장 레벨, 퀘스트 보고 위치를 표시합니다. 표시를 누르면 가장 가까운 비행 지점을 골라 줍니다.
-- 지도 아래 버튼으로 지도 모양을 고를 수 있습니다: 기본 지도, 자동(달마다 계절), 봄, 여름, 가을, 겨울, 양피지.
-- 계절 지도에서는 꽃잎, 반짝임, 낙엽, 눈이 은은하게 날립니다(`/ezfl fx`로 끄기).
-- 비행 지점과 던전 이름표가 대륙 옆에 겹치지 않게 놓이고 곡선 점선으로 이어집니다. `/ezfl edit`로 이름표를 직접 옮길 수 있습니다.
-- 비행 지점이 아닌 "일반 (세계 대상)" 같은 항목이 목록에 나오던 문제를 고쳤습니다.
-- 다른 EzWoW 사용자와 기록을 주고받는 공유 기능이 동작하지 않던 문제를 수정했습니다.
+- 지도 위 이름표에는 목적지 이름만 표시합니다. 소요 시간은 마우스를 올린 툴팁과 오른쪽 목록에 나옵니다.
+- 미리보기(/ezfl preview)에서 옮긴 이름표 위치가 실제 비행 지도에서도 같은 자리에 나오도록 고쳤습니다. 이름표가 비행 지점 아이콘을 덮지 않습니다.
+- 미리보기 창을 Esc로 닫을 수 있습니다.
+- 다른 EzWoW 사용자와 기록을 주고받을 때, 귓속말이 닿지 않는 사람에게 같은 기록을 반복해서 보내지 않습니다. 그 사람이 다시 접속하면 바로 다시 주고받습니다.
 
 ### English
-- The flight map now shows zone names with a zone highlight, dungeon entrances with level ranges, and quest turn-in spots. Clicking a marker selects the nearest flight point.
-- Pick the map look with the button under the map: game map, Auto (changes with the month), Spring, Summer, Autumn, Winter or Parchment.
-- Seasonal maps have petals, glints, leaves or snow drifting gently (`/ezfl fx` turns them off).
-- Flight point and dungeon labels sit beside the continent without overlapping, joined by curved dotted lines. Move labels by hand with `/ezfl edit`.
-- Fixed internal entries such as "Generic, World target" showing up as destinations.
-- Fixed data sharing with other EzWoW users not working.
+- Map labels show the destination name only; the flight time is in the hover tooltip and the list.
+- Labels moved in the preview (/ezfl preview) now sit in the same place on the real flight map and no longer cover the flight point icon.
+- Escape closes the preview window.
+- Record sharing with other EzWoW users no longer keeps whispering players it cannot reach; it picks them up again as soon as they come back online.
