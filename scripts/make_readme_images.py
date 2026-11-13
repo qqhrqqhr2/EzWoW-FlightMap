@@ -73,6 +73,10 @@ def parse_locales(src):
     for lang, blk in (("en", en), ("ko", ko)):
         wm = re.search(r"WM = \{(.*?)\n        \}", blk, re.S).group(1)
         out[lang]["WM"] = dict(re.findall(r'(\w+)\s*=\s*"((?:[^"\\]|\\.)*)"', wm))
+    # strings added later as LOCALES.xx["KEY"] = "..." lines
+    for lang, code in (("en", "enUS"), ("ko", "koKR")):
+        for key, val in re.findall(r'LOCALES\.' + code + r'\["(\w+)"\]\s*=\s*"([^"]*)"', src):
+            out[lang].setdefault(key, val)
     return out
 
 
@@ -165,21 +169,21 @@ T = {
         "lead": "비행 조련사와 대화하면 목적지 이름 · 시간 · 요금을 한눈에 보여 주는 전용 비행 지도, 남은 시간 막대와 비행 중 미니게임",
         "notes": [
             ("제목 줄 버튼", "톱니바퀴: 설정창, 목록 아이콘: 오른쪽 목적지 목록 켜기/끄기, X: 닫기. 제목 줄을 끌어 옮기고 Ctrl+휠로 크기 조절."),
-            ("목적지 이름표", "기본은 한 줄 이름표(이름 · 시간)이고, 요금과 지역은 마우스를 올리면 나옵니다. 설정에서 끄면 이름 · 지역 · 요금 · 시간의 세 줄 이름표. “약”이 붙은 시간은 거리로 계산한 예상치, 없는 것은 실제로 날아서 기록한 시간."),
+            ("목적지 이름표", "기본은 이름만 쓴 한 줄 이름표이고, 시간 · 요금 · 지역은 마우스를 올리면 나옵니다(시간은 오른쪽 목록에도). 설정에서 끄면 이름 · 지역 · 요금 · 시간의 세 줄 이름표. “약”이 붙은 시간은 거리로 계산한 예상치, 없는 것은 실제로 날아서 기록한 시간."),
             ("검색", "이름 일부를 입력하면 걸러지고, Enter를 누르면 첫 번째 비행 가능 목적지로 바로 출발합니다."),
             ("정렬 · 즐겨찾기", "이름/시간/요금 정렬. 이 조련사에서 최근에 간 곳과 별(★)을 누른 곳이 맨 위에 고정됩니다. 돈이 모자라면 요금이 빨간색."),
             ("경로 강조 · 툴팁", "마우스를 올리면 경로선과 이동 방향 빛, 요금 · 시간 · 경유지 수가 나옵니다. 클릭하면 비행합니다."),
             ("남은 시간 막대", "비행 중 남은 시간, 경유 구간, 도착 예정 시각. 도착하면 소리와 작업 표시줄 깜빡임. 퀘스트 비행처럼 지도 없이 시작한 비행도 표시하고 시간을 기록합니다."),
             ("미니게임", "지뢰찾기 · 짝 맞추기 · 퍼즐 맞추기 · 솔리테어. 비행을 시작하면 열리고 착륙하면 닫힙니다. 비행 중에 창을 닫으면 다음부터 자동으로 열지 않습니다."),
         ],
-        "foot": "애드온 코드의 창 크기·좌표·색상·문구로 재현한 예시 화면입니다. 실제 창에는 게임의 대륙 지도가 배경으로 나옵니다. 요금과 시간은 예시입니다.",
+        "foot": "애드온 코드의 창 크기·좌표·색상·문구로 재현한 예시 화면입니다. 실제 지도 모양은 아래 게임 화면을 보세요. 요금과 시간은 예시입니다.",
         "sTitle": "설정창",
         "sLead": "/ezfl config · 언어, 지도 사용, 대화창 건너뛰기, 세계지도 조련사 표시, 이름표, 목록, 창 크기, 비행 중 알림",
         "sNotes": [
             ("언어", "상자를 누르고 목록에서 자동 또는 8개 언어 중 고릅니다. 화면 문구가 바로 바뀝니다."),
             ("기본", "전용 비행 지도 사용, 대화창 없이 바로 지도 열기(Shift를 누른 채 말을 걸면 대화창), 비행 전 확인 창."),
             ("세계지도", "얼라이언스(파랑) · 호드(빨강) · 중립(금색) 비행 조련사를 진영별로 켜고 끄고, 왼쪽 아래 도킹 버튼(2번째 칸)을 자동 정렬합니다."),
-            ("지도 표시", "이름표, 한 줄 이름표(처음엔 켜짐), 비행 지점 부분만 확대, 미발견 · 미연결 지점, 목적지 목록, 현재 위치 파동, 검색창 바로 입력."),
+            ("지도 표시", "이름표, 한 줄 이름표(처음엔 켜짐), 비행 지점 부분만 확대, 미발견 · 미연결 지점, 목적지 목록, 현재 위치 파동, 대륙 지도 · 구역 이름 · 퀘스트 보고 위치 · 던전 입구, 검색창 바로 입력."),
             ("슬라이더", "창 크기 50~120%, 창 투명도 0~70%, 글자 크기 8~14."),
             ("비행 중", "남은 시간 막대, 도착 알림, 착륙 직전 알림(처음엔 꺼짐, 기본 15초 전 · /ezfl soon 숫자로 변경)."),
             ("하단", "창 · 버튼 위치 초기화(지도 창에서 열면 ‘기본 비행 지도로 보기’), 후원하기."),
@@ -191,21 +195,21 @@ T = {
         "lead": "A dedicated flight map that shows each destination's name, time and fare at a glance, a flight timer bar and mini games for the ride",
         "notes": [
             ("Title buttons", "Gear: settings, list icon: toggle the destination list, X: close. Drag the title to move, Ctrl + wheel to resize."),
-            ("Destination labels", "Short one-line labels (name · time) by default; fare and zone show on hover. Turn the option off for three-line labels with name, zone, fare and time. Times with “~” are estimates from the route distance, the others were recorded on real flights."),
+            ("Destination labels", "Short one-line labels with the name by default; time, fare and zone show on hover (the time also in the list). Turn the option off for three-line labels with name, zone, fare and time. Times with “~” are estimates from the route distance, the others were recorded on real flights."),
             ("Search", "Type part of a name to filter. Enter flies to the first reachable result."),
             ("Sort · favourites", "Sort by name, time or fare. The place you last flew to from this flight master and starred (★) places stay on top. Fares you cannot afford are red."),
             ("Route highlight · tooltip", "Hover to see the path with a moving light, fare, time and number of stops. Click to fly."),
             ("Flight timer bar", "Time left, current leg and arrival time; a sound and a taskbar flash on arrival. Flights started without the map, such as quest flights, are shown and timed too."),
             ("Mini games", "Minesweeper · Memory · Sliding Puzzle · Solitaire. Opens when a flight starts and closes on landing. Close it during a flight and it stops opening by itself."),
         ],
-        "foot": "Mock-up rebuilt from the window sizes, coordinates, colours and strings in the addon code. In game the continent map art is shown in the background. Fares and times are examples.",
+        "foot": "Mock-up rebuilt from the window sizes, coordinates, colours and strings in the addon code. See the in-game screenshots below for the real map looks. Fares and times are examples.",
         "sTitle": "Settings",
         "sLead": "/ezfl config · language, custom map, gossip skip, world map flight masters, labels, list, window size, in-flight alerts",
         "sNotes": [
             ("Language", "Click the box and pick Auto or one of 8 languages. Texts change at once."),
             ("General", "Use the custom flight map, skip the gossip and open the map directly (hold Shift to see it), confirm before flying."),
             ("World Map", "Alliance (blue), Horde (red) and Neutral (gold) flight masters by faction, and auto-align of the bottom-left dock button (2nd slot)."),
-            ("Map", "Labels, short one-line labels (on by default), zoom to flight points, undiscovered and unconnected points, destination list, location pulse, type into the search box at once."),
+            ("Map", "Labels, short one-line labels (on by default), zoom to flight points, undiscovered and unconnected points, destination list, location pulse, continent map, zone names, quest turn-ins and dungeon entrances, type into the search box at once."),
             ("Sliders", "Window size 50–120%, transparency 0–70%, text size 8–14."),
             ("In flight", "Timer bar, arrival alert, alert shortly before landing (off by default, 15 seconds before; change with /ezfl soon <seconds>)."),
             ("Bottom", "Reset window and button positions (‘Show default flight map’ when opened from the map), donate."),
@@ -406,8 +410,6 @@ def flight_map(ctx, lang, x0, y0, k):
         extra = ""
         if n[7] == "CURRENT":
             extra = f'&nbsp;&nbsp;<span style="color:#8cffa6">{esc(L["CURRENT"])}</span>'
-        elif n[7] == "REACHABLE":
-            extra = f'&nbsp;&nbsp;<span style="color:#d9dbe0">{esc(fmt_time(L, n[9], n[10]))}</span>'
         text = name + extra
         # width of the text (rough, refined in the browser): CJK ~1 em, latin ~.55 em
         plain = re.sub(r"<[^>]+>|&nbsp;", " ", text)

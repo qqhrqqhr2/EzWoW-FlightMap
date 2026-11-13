@@ -23,9 +23,7 @@ WoW Forever (`Interface: 16001`) · `/ezfl` · `/미니게임`
 
 ![비행 지도](docs/images/ui_ko.png)
 
-![설정창](docs/images/settings_ko.png)
-
-> 이미지는 애드온 코드의 창 크기·좌표·색상·문구로 재현한 **예시 화면**입니다. 실제 창에는 게임의 대륙 지도가 배경으로 나옵니다. 요금과 시간은 예시입니다.
+> 실제 게임 화면입니다(WoW Forever, 한국어 클라이언트). 캐릭터 · 다른 플레이어 이름과 채팅 내용은 가렸습니다.
 
 ### 설치
 
@@ -33,7 +31,7 @@ WoW Forever (`Interface: 16001`) · `/ezfl` · `/미니게임`
 2. 캐릭터 선택 화면의 **애드온** 목록에서 켭니다.
 3. 비행 조련사에게 말을 걸면 전용 지도가 열립니다. 설정은 `/ezfl`.
 
-### 비행 지도 사용법 (위 그림의 번호)
+### 비행 지도 사용법
 
 | 번호 | 부분 | 설명 |
 |---|---|---|
@@ -157,9 +155,7 @@ When you talk to a flight master (gryphon, wyvern, bat or hippogryph), Flight Ma
 
 ![Flight map](docs/images/ui_en.png)
 
-![Settings window](docs/images/settings_en.png)
-
-> These are **mock-ups** rebuilt from the window sizes, coordinates, colours and strings in the code. In game the continent map art is shown in the background. Fares and times are examples.
+> In-game screenshots (WoW Forever, Korean client). Character and player names and chat text are blurred.
 
 ### Installation
 
@@ -167,7 +163,7 @@ When you talk to a flight master (gryphon, wyvern, bat or hippogryph), Flight Ma
 2. Enable it in the **AddOns** list on the character select screen.
 3. Talk to a flight master to open the map. Settings: `/ezfl`.
 
-### Using the flight map (numbers in the picture)
+### Using the flight map
 
 | No. | Part | Description |
 |---|---|---|

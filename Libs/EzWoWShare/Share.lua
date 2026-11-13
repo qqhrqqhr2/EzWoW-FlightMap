@@ -32,7 +32,7 @@ local ADDON_NAME, ns = ...
 local type, pairs, ipairs, tonumber, tostring, pcall, next = type, pairs, ipairs, tonumber, tostring, pcall, next
 local floor, format, concat, max, min = math.floor, string.format, table.concat, math.max, math.min
 
-local LIB_VERSION = 6
+local LIB_VERSION = 7
 
 -- one table for every copy (a newer copy updates the functions in it)
 local lib = _G.EzWoW_Share
@@ -77,6 +77,7 @@ local TEXTS = {
         channelOff = "Only the party, raid and guild are used (no channel).",
         help = "/ezshare on | off | channel on | channel off | status | roster | ping [name]",
         status = "Records: quests %d, rare sightings %d, drop sources %d, gathering spots %d.",
+        applied = "Of these, received from other players and in use: quests %d, rare sightings %d, drop sources %d, gathering spots %d.",
         traffic = "This session: %d records received from %d players, %d messages sent.",
         lastSend = "Last send: %s (targets %d).",
         via = "Players by way: %s",
@@ -95,6 +96,10 @@ local TEXTS = {
         seen = "Seen %s ago",
         seenShared = "Seen %s ago (shared)",
         droppedBy = "Drops from",
+        soldBy = "Sold by",
+        andMore = "+%d more",
+        manyDrops = "many creatures (%d)",
+        manyVendors = "many vendors (%d)",
         object = "object",
         minutes = "%d min",
         hours = "%d h",
@@ -107,6 +112,7 @@ local TEXTS = {
         channelOff = "파티·공격대·길드로만 공유합니다(채널 안 씀).",
         help = "/ezshare on | off | channel on | channel off | status | roster | ping [이름]  (/공유)",
         status = "기록: 퀘스트 %d, 희귀 몬스터 목격 %d, 드롭 출처 %d, 채집 위치 %d.",
+        applied = "그중 다른 사람에게 받아 쓰고 있는 것: 퀘스트 %d, 희귀 몬스터 목격 %d, 드롭 출처 %d, 채집 위치 %d.",
         traffic = "이번 접속: 받은 기록 %d개 (보낸 사람 %d명), 보낸 메시지 %d개.",
         lastSend = "마지막 보내기: %s (보낼 곳 %d곳).",
         via = "보낸 사람 경로: %s",
@@ -125,6 +131,10 @@ local TEXTS = {
         seen = "%s 전 목격",
         seenShared = "%s 전 목격 (공유)",
         droppedBy = "드롭",
+        soldBy = "판매",
+        andMore = "외 %d곳",
+        manyDrops = "여러 몬스터 (%d곳)",
+        manyVendors = "여러 상인 (%d곳)",
         object = "오브젝트",
         minutes = "%d분",
         hours = "%d시간",
@@ -273,6 +283,7 @@ local pendingKinds = {}
 local function changed(kind)
     pendingKinds[kind] = true
     if lib.reverseDrops then lib.reverseDrops = nil end
+    if lib.reverseVendors then lib.reverseVendors = nil end
 end
 
 local function flushChanged()
@@ -449,6 +460,12 @@ end
 local function onLootOpened()
     if not lib.IsEnabled() then return end
     if IsFishingLoot and IsFishingLoot() then return end
+    -- inside a dungeon: which one (positions are not known there)
+    local instanceMap
+    if IsInInstance and IsInInstance() and GetInstanceInfo then
+        local okInfo, _, _, _, _, _, _, _, mapID = pcall(GetInstanceInfo)
+        if okInfo and type(mapID) == "number" and not isSecret(mapID) and mapID > 0 then instanceMap = mapID end
+    end
     local count = GetNumLootItems and GetNumLootItems() or 0
     if isSecret(count) then return end
     local drops = lib.Data().drops
@@ -470,6 +487,9 @@ local function onLootOpened()
                             changed("gather")
                         end
                     end
+                    if src and instanceMap and src:sub(1, 1) == "n" and lib.NoteInstance then
+                        lib.NoteInstance(sourceID, instanceMap)
+                    end
                     if src then
                         local key = guid .. ":" .. itemID
                         if not lootSeen[key] then
@@ -490,6 +510,15 @@ end
 -----------------------------------------------------------------------------
 -- Reading (for the addons that show records)
 -----------------------------------------------------------------------------
+-- Records shipped with the addons (EzWoW-MapFinder Database/ShareSeed.lua):
+-- what EzWoW players found and shared before, for players who have not
+-- received it themselves. kind: "drops", "gather", "offers"
+function lib.Seed(kind)
+    local seed = _G.EzWoW_ShareSeed
+    local t = type(seed) == "table" and seed[kind]
+    return type(t) == "table" and t or nil
+end
+
 -- rare monster sighting: { m = mapID, x, y, t = time, shared = true|nil } or nil
 function lib.GetRare(npcID)
     local r = lib.Data().rare[tonumber(npcID) or 0]
@@ -508,6 +537,19 @@ function lib.GetDropSources(itemID)
                     if type(id) == "number" then
                         rev[id] = rev[id] or {}
                         rev[id][#rev[id] + 1] = { src = src, own = type(v) == "number" and v or nil }
+                    end
+                end
+            end
+        end
+        -- shipped records the player does not have yet
+        local mine = lib.Data().drops
+        for src, items in pairs(lib.Seed("drops") or {}) do
+            if type(src) == "string" and type(items) == "table" then
+                local have = type(mine[src]) == "table" and mine[src] or nil
+                for _, id in ipairs(items) do
+                    if type(id) == "number" and not (have and have[id]) then
+                        rev[id] = rev[id] or {}
+                        rev[id][#rev[id] + 1] = { src = src }
                     end
                 end
             end
@@ -944,15 +986,37 @@ end
 
 local playerFull
 
+-- the sender may come as "name-realm", "name" or "name surname"
+local playerWithSurname
 local function isMe(sender)
     if not playerFull then
-        local name = UnitName and UnitName("player")
+        local name, second = nil, nil
+        if UnitName then name, second = UnitName("player") end
         local realm = (GetNormalizedRealmName and GetNormalizedRealmName()) or ""
         playerFull = (name or "") .. "-" .. realm
+        -- (a realm never comes with a space, so this can't match another player)
+        if type(name) == "string" and type(second) == "string" and second ~= ""
+            and not isSecret(second) then
+            playerWithSurname = name .. " " .. second
+        end
     end
-    if sender == playerFull then return true end
+    if sender == playerFull or (playerWithSurname and sender == playerWithSurname) then return true end
     local short = Ambiguate and Ambiguate(sender, "none")
-    return short ~= nil and UnitName and short == UnitName("player")
+    if short == nil then return false end
+    if playerWithSurname and short == playerWithSurname then return true end
+    return UnitName and short == UnitName("player")
+end
+
+-- true when a sender hash is this character's (its own messages coming back)
+function lib.IsOwnHash(hash)
+    hash = tonumber(hash)
+    if not hash then return false end
+    isMe("")
+    local name = UnitName and UnitName("player")
+    for _, n in ipairs({ playerFull, playerWithSurname, name }) do
+        if type(n) == "string" and n ~= "" and senderHash(n) == hash then return true end
+    end
+    return false
 end
 
 local GROUP_CHANNELS = { PARTY = true, RAID = true, GUILD = true, INSTANCE_CHAT = true }
@@ -992,6 +1056,200 @@ function lib.Store(code)
     if type(ext[code]) ~= "table" then ext[code] = {} end
     return ext[code]
 end
+
+-----------------------------------------------------------------------------
+-- What NPCs sell, seen in their shop windows (record kind "M":
+-- "npcID,itemID.itemID...", base 36). This character's own list is the shop
+-- as seen on the last visit; an item from other players counts once enough
+-- different players saw it (see lib.Vote).
+-- store M: [npcID] = { own = { itemID, ... }, got = { [itemID] = true } }
+-----------------------------------------------------------------------------
+local VENDOR_KIND = "M"
+local VENDOR_ITEMS_MAX = 150
+
+local function vendorStore()
+    return lib.Store(VENDOR_KIND)
+end
+
+local function b36(n)
+    local digits, out = "0123456789abcdefghijklmnopqrstuvwxyz", ""
+    n = math.floor(n)
+    repeat
+        local d = n % 36
+        out = digits:sub(d + 1, d + 1) .. out
+        n = math.floor(n / 36)
+    until n == 0
+    return out
+end
+
+-- the shop window that is open: who sells what
+function lib.OnMerchantShow()
+    if not (lib.IsEnabled() and type(GetMerchantNumItems) == "function" and type(GetMerchantItemID) == "function") then return end
+    local okGuid, guid = pcall(UnitGUID, "npc")
+    local src, npcID = guidSource(okGuid and guid or nil)
+    if not src or src:sub(1, 1) ~= "n" then return end
+    local okN, n = pcall(GetMerchantNumItems)
+    n = okN and tonumber(n) or 0
+    if isSecret(n) or n <= 0 then return end
+    local items, seen = {}, {}
+    for i = 1, math.min(n, VENDOR_ITEMS_MAX) do
+        local okID, itemID = pcall(GetMerchantItemID, i)
+        if okID and type(itemID) == "number" and not isSecret(itemID) and itemID > 0 and not seen[itemID] then
+            seen[itemID] = true
+            items[#items + 1] = itemID
+        end
+    end
+    if #items == 0 then return end
+    table.sort(items)
+    local t = vendorStore()
+    local row = type(t[npcID]) == "table" and t[npcID] or {}
+    t[npcID] = row
+    local old = type(row.own) == "table" and table.concat(row.own, ",") or ""
+    row.own = items
+    row.t = now()
+    if old ~= table.concat(items, ",") then changed("vendors") end
+end
+
+-- itemID -> list of npcIDs that sell it: this character's shops, items
+-- confirmed by other players, then the records shipped with the addons
+function lib.GetVendors(itemID)
+    itemID = tonumber(itemID)
+    if not itemID then return nil end
+    if not lib.reverseVendors then
+        local rev = {}
+        local function add(id, npcID)
+            local list = rev[id]
+            if not list then
+                list = {}
+                rev[id] = list
+            end
+            for _, n in ipairs(list) do
+                if n == npcID then return end
+            end
+            list[#list + 1] = npcID
+        end
+        local ownSeen = {}
+        for npcID, row in pairs(vendorStore()) do
+            if type(npcID) == "number" and type(row) == "table" then
+                if type(row.own) == "table" then
+                    ownSeen[npcID] = true
+                    for _, id in ipairs(row.own) do add(id, npcID) end
+                end
+                for id, ok in pairs(type(row.got) == "table" and row.got or {}) do
+                    -- a shop seen here lately: its own list is the newer one
+                    if ok == true and not ownSeen[npcID] then add(id, npcID) end
+                end
+            end
+        end
+        for npcID, items in pairs(lib.Seed("vendors") or {}) do
+            if type(npcID) == "number" and type(items) == "table" and not ownSeen[npcID] then
+                for _, id in ipairs(items) do add(id, npcID) end
+            end
+        end
+        lib.reverseVendors = rev
+    end
+    return lib.reverseVendors[itemID]
+end
+
+lib.RegisterKind(VENDOR_KIND, {
+    own = function()
+        local out = {}
+        for npcID, row in pairs(vendorStore()) do
+            if type(npcID) == "number" and type(row) == "table" and type(row.own) == "table" then
+                local head = npcID .. ","
+                local parts = {}
+                local size = #head
+                for _, id in ipairs(row.own) do
+                    local code = b36(id)
+                    if size + #code + 1 > 180 then
+                        out[#out + 1] = head .. table.concat(parts, ".")
+                        parts, size = {}, #head
+                    end
+                    parts[#parts + 1] = code
+                    size = size + #code + 1
+                end
+                if #parts > 0 then out[#out + 1] = head .. table.concat(parts, ".") end
+            end
+        end
+        return out
+    end,
+    receive = function(body, hash, needed)
+        local npcID, list = body:match("^(%d+),([%w%.]+)$")
+        npcID = tonumber(npcID)
+        if not npcID or npcID < 1 or npcID > 10000000 or not list then return false end
+        local t = vendorStore()
+        local row = type(t[npcID]) == "table" and t[npcID] or nil
+        local any = false
+        for code in list:gmatch("[^%.]+") do
+            local itemID = tonumber(code, 36)
+            if itemID and itemID > 0 and itemID < 10000000 then
+                local n = lib.Vote("M:" .. npcID .. ":" .. itemID, "1", hash)
+                if n and n >= (tonumber(needed) or 2) then
+                    if not row then
+                        row = {}
+                        t[npcID] = row
+                    end
+                    row.got = type(row.got) == "table" and row.got or {}
+                    if not row.got[itemID] then
+                        row.got[itemID] = true
+                        any = true
+                    end
+                end
+            end
+        end
+        if any then changed("vendors") end
+        return any
+    end,
+})
+
+-----------------------------------------------------------------------------
+-- The dungeon a creature was looted in (record kind "Z": "npcID,instanceMapID").
+-- store Z: [npcID] = { own = instanceMapID, got = instanceMapID }
+-----------------------------------------------------------------------------
+local INSTANCE_KIND = "Z"
+
+function lib.NoteInstance(npcID, instanceMap)
+    if type(npcID) ~= "number" or type(instanceMap) ~= "number" then return end
+    local t = lib.Store(INSTANCE_KIND)
+    local row = type(t[npcID]) == "table" and t[npcID] or {}
+    if row.own == instanceMap then return end
+    row.own = instanceMap
+    t[npcID] = row
+    changed("instances")
+end
+
+-- instance map ID of the dungeon a creature was looted in (nil when not known)
+function lib.InstanceOf(npcID)
+    local row = lib.Store(INSTANCE_KIND)[tonumber(npcID) or 0]
+    if type(row) ~= "table" then return nil end
+    return tonumber(row.own) or tonumber(row.got)
+end
+
+lib.RegisterKind(INSTANCE_KIND, {
+    own = function()
+        local out = {}
+        for npcID, row in pairs(lib.Store(INSTANCE_KIND)) do
+            if type(npcID) == "number" and type(row) == "table" and type(row.own) == "number" then
+                out[#out + 1] = npcID .. "," .. row.own
+            end
+        end
+        return out
+    end,
+    receive = function(body, hash, needed)
+        local npcID, mapID = body:match("^(%d+),(%d+)$")
+        npcID, mapID = tonumber(npcID), tonumber(mapID)
+        if not (npcID and mapID) or npcID < 1 or npcID > 10000000 or mapID < 1 or mapID > 100000 then return false end
+        local n = lib.Vote("Z:" .. npcID, tostring(mapID), hash)
+        if not n or n < (tonumber(needed) or 2) then return false end
+        local t = lib.Store(INSTANCE_KIND)
+        local row = type(t[npcID]) == "table" and t[npcID] or {}
+        if row.got == mapID then return false end
+        row.got = mapID
+        t[npcID] = row
+        changed("instances")
+        return true
+    end,
+})
 
 -- where an object (herb, vein, chest...) was looted: list of { continent, x, y }
 function lib.GetGatherSpots(objectID)
@@ -1732,16 +1990,37 @@ function lib.SetEnabled(on, useChannel)
     end
 end
 
-local function counts()
+-- all records, then (shared = true) only those received from other players
+local function counts(shared)
     local d = lib.Data()
     local nq, nr, nd, ng = 0, 0, 0, 0
     for _, key in ipairs({ "questEnders", "questGivers" }) do
-        for _ in pairs(d.quest[key]) do nq = nq + 1 end
+        for _, v in pairs(d.quest[key]) do
+            if not shared or (type(v) == "table" and v.shared) then nq = nq + 1 end
+        end
     end
-    for _ in pairs(d.rare) do nr = nr + 1 end
-    for _ in pairs(d.drops) do nd = nd + 1 end
+    for _, v in pairs(d.rare) do
+        if not shared or (type(v) == "table" and v.shared) then nr = nr + 1 end
+    end
+    for _, items in pairs(d.drops) do
+        local fromOthers = false
+        if shared and type(items) == "table" then
+            for _, v in pairs(items) do
+                if v == "s" then fromOthers = true break end
+            end
+        end
+        if not shared or fromOthers then nd = nd + 1 end
+    end
     for _, spots in pairs(d.gather) do
-        if type(spots) == "table" then ng = ng + #spots end
+        if type(spots) == "table" then
+            if not shared then
+                ng = ng + #spots
+            else
+                for _, spot in ipairs(spots) do
+                    if type(spot) == "table" and spot.shared then ng = ng + 1 end
+                end
+            end
+        end
     end
     return nq, nr, nd, ng
 end
@@ -1777,6 +2056,7 @@ function lib.Slash(msg)
         say(lib.IsEnabled() and T("on") or T("off"))
         if lib.IsEnabled() then say(lib.UsesChannel() and T("channelOn") or T("channelOff")) end
         say(format(T("status"), counts()))
+        say(format(T("applied"), counts(true)))
         local stats = lib.stats
         say(format(T("traffic"), stats.received, stats.players, stats.sent))
         say(format(T("lastSend"), tostring(stats.note or "-"), #targets()))
@@ -1815,30 +2095,271 @@ end
 -----------------------------------------------------------------------------
 -- Tooltips: where an item drops, when a rare was seen
 -----------------------------------------------------------------------------
-local TIP_SOURCES = 4
+local TIP_SOURCES = 3
+local TIP_SOURCES_SHIFT = 10   -- with Shift held: the list opens up
+local NAMES_PER_LINE = 3        -- an opened list goes down, this many names a line
+local COMMON_DROP = 20          -- dropped by this many or more: not listed by name
+
+local function tipLimit()
+    return (IsShiftKeyDown and IsShiftKeyDown()) and TIP_SOURCES_SHIFT or TIP_SOURCES
+end
 
 local function ownTooltip(tip)
     return tip == _G.GameTooltip or tip == _G.ItemRefTooltip
 end
 
-function lib.OnItemTooltip(tip, data)
-    if not (ownTooltip(tip) and lib.ShowsTooltips()) or type(data) ~= "table" then return end
-    local itemID = data.id
-    if isSecret(itemID) or type(itemID) ~= "number" then return end
+-- The "EzWoW - <addon>" name line under the lines added here: the Tooltip
+-- addon's name when it is loaded (item and unit tooltips are its part),
+-- else the addon whose copy of this library runs
+local function tagText()
+    if lib.hosts and lib.hosts["EzWoW-Tooltip"] then return "EzWoW - Tooltip" end
+    local title
+    local getMeta = (C_AddOns and C_AddOns.GetAddOnMetadata) or _G.GetAddOnMetadata
+    if type(getMeta) == "function" and lib.owner then
+        local ok, t = pcall(getMeta, lib.owner, "Title")
+        if ok and type(t) == "string" then title = t:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "") end
+    end
+    if type(title) == "string" and title:find("^EzWoW %- ") then return title end
+    return "EzWoW"
+end
+
+local function addTag(tip)
+    -- with EzWoW - Tooltip: its one name line at the bottom covers these lines too
+    local attribute = _G.EzWoWTooltipAttribute
+    if lib.hosts and lib.hosts["EzWoW-Tooltip"] and type(attribute) == "function" then
+        if pcall(attribute, tip) then
+            if tip.Show then pcall(tip.Show, tip) end
+            return
+        end
+    end
+    tip:AddDoubleLine(" ", tagText(), 0, 0, 0, 0.5, 0.5, 0.5)
+    local sizer = _G.EzWoWTooltipTagSizer
+    if sizer and sizer.Refit then pcall(sizer.Refit, tip) end
+    if tip.Show then pcall(tip.Show, tip) end
+end
+
+-- "a, b, c" with "+N more" when the list is longer; a longer list (Shift)
+-- goes on in more lines under the first: returns first line, { more lines }
+local function namesText(names, total)
+    local lines = {}
+    for i = 1, #names, NAMES_PER_LINE do
+        local part = {}
+        for j = i, math.min(i + NAMES_PER_LINE - 1, #names) do part[#part + 1] = names[j] end
+        lines[#lines + 1] = concat(part, ", ")
+    end
+    if #lines == 0 then return nil, nil end
+    if total > #names then
+        lines[#lines] = lines[#lines] .. " (" .. format(T("andMore"), total - #names) .. ")"
+    end
+    local first = table.remove(lines, 1)
+    return first, (#lines > 0) and lines or nil
+end
+
+-- "Drops from" text of an item (nil: no named source)
+function lib.DropText(itemID)
     local list = lib.GetDropSources(itemID)
-    if not list or #list == 0 then return end
+    if not list or #list == 0 then return nil end
     -- sources without a known name are left out (no bare "object" word)
-    local names, seen = {}, {}
+    local names, seen, total = {}, {}, 0
     for _, row in ipairs(list) do
         local name = lib.SourceName(row.src)
         if name and not seen[name] then
             seen[name] = true
-            names[#names + 1] = name
+            total = total + 1
+            if #names < tipLimit() then names[#names + 1] = name end
         end
-        if #names >= TIP_SOURCES then break end
     end
-    if #names == 0 then return end
-    tip:AddLine(T("droppedBy") .. ": " .. concat(names, ", "), 0.6, 0.8, 1, true)
+    if #names == 0 then return nil end
+    -- dropped all over (cloth, coins...): only how many (Shift opens the first ten)
+    if total >= COMMON_DROP and not (IsShiftKeyDown and IsShiftKeyDown()) then
+        return format(T("manyDrops"), total) .. " · Shift", nil
+    end
+    return namesText(names, total)
+end
+
+-- Recipe scrolls among the shops and drops seen: a scroll's name is
+-- "<kind>: <recipe name>" ("요리법: ...", "Recipe: ..."), which ties it to the
+-- recipe. Built again a while later (new records, names not loaded yet).
+local RECIPE_CLASS = (Enum and Enum.ItemClass and Enum.ItemClass.Recipe) or 9
+local scrollIndex, scrollIndexAt, scrollNamesMissing = nil, -1000, false
+
+local function normName(text)
+    if type(text) ~= "string" or text == "" or isSecret(text) then return nil end
+    return (text:lower():gsub("^%s+", ""):gsub("%s+$", ""))
+end
+
+local function buildScrollIndex()
+    local ids = {}
+    local function addID(id) if type(id) == "number" and id > 0 then ids[id] = true end end
+    for _, row in pairs(lib.Store("M")) do
+        if type(row) == "table" then
+            for _, id in ipairs(type(row.own) == "table" and row.own or {}) do addID(id) end
+            for id, ok in pairs(type(row.got) == "table" and row.got or {}) do if ok == true then addID(id) end end
+        end
+    end
+    for _, items in pairs(lib.Seed("vendors") or {}) do
+        for _, id in ipairs(type(items) == "table" and items or {}) do addID(id) end
+    end
+    for _, items in pairs(lib.Data().drops) do
+        for id in pairs(type(items) == "table" and items or {}) do addID(id) end
+    end
+    for _, items in pairs(lib.Seed("drops") or {}) do
+        for _, id in ipairs(type(items) == "table" and items or {}) do addID(id) end
+    end
+    local index = {}
+    scrollNamesMissing = false
+    local getInstant = (C_Item and C_Item.GetItemInfoInstant) or _G.GetItemInfoInstant
+    local getName = C_Item and C_Item.GetItemNameByID
+    if type(getInstant) ~= "function" then return index end
+    for id in pairs(ids) do
+        local okInfo, _, _, _, _, _, classID = pcall(getInstant, id)
+        if okInfo and classID == RECIPE_CLASS then
+            local okName, name = false, nil
+            if getName then okName, name = pcall(getName, id) end
+            if okName and type(name) == "string" and not isSecret(name) then
+                local key = normName(name:match("^[^:]+:%s*(.+)$") or name:match("：%s*(.+)$"))
+                if key then
+                    index[key] = index[key] or {}
+                    table.insert(index[key], id)
+                end
+            else
+                scrollNamesMissing = true
+                if C_Item and C_Item.RequestLoadItemDataByID then pcall(C_Item.RequestLoadItemDataByID, id) end
+            end
+        end
+    end
+    return index
+end
+
+-- { { label, text }, ... } for the scrolls of a recipe (by its name, any of
+-- the names given)
+function lib.RecipeSourceLines(...)
+    local out = {}
+    if not lib.ShowsTooltips() then return out end
+    local t = clock()
+    if not scrollIndex or t - scrollIndexAt > (scrollNamesMissing and 3 or 60) then
+        local ok, index = pcall(buildScrollIndex)
+        scrollIndex = ok and index or {}
+        scrollIndexAt = t
+    end
+    local scrolls, seen = {}, {}
+    for i = 1, select("#", ...) do
+        for _, id in ipairs(scrollIndex[normName((select(i, ...)))] or {}) do
+            if not seen[id] then
+                seen[id] = true
+                scrolls[#scrolls + 1] = id
+            end
+        end
+    end
+    local soldText, soldMore, dropText, dropMore
+    for _, id in ipairs(scrolls) do
+        if not soldText then soldText, soldMore = lib.VendorText(id) end
+        if not dropText then dropText, dropMore = lib.DropText(id) end
+    end
+    if soldText then out[#out + 1] = { T("soldBy"), soldText, soldMore } end
+    if dropText then out[#out + 1] = { T("droppedBy"), dropText, dropMore } end
+    return out
+end
+
+-- The lines for an item, for an addon that draws them in its own block
+-- (EzWoW - Tooltip): { { label, text }, ... } (empty: nothing to show)
+function lib.ItemSourceLines(itemID)
+    local out = {}
+    itemID = tonumber(itemID)
+    if not itemID or not lib.ShowsTooltips() then return out end
+    local sold, soldMore = lib.VendorText(itemID)
+    if sold then out[#out + 1] = { T("soldBy"), sold, soldMore } end
+    local dropped, droppedMore = lib.DropText(itemID)
+    if dropped then out[#out + 1] = { T("droppedBy"), dropped, droppedMore } end
+    return out
+end
+
+function lib.OnItemTooltip(tip, data)
+    if not (ownTooltip(tip) and lib.ShowsTooltips()) or type(data) ~= "table" then return end
+    -- an addon draws these lines in its own block (see lib.ItemSourceLines)
+    if lib.itemLinesBy and lib.hosts and lib.hosts[lib.itemLinesBy] then return end
+    local itemID = data.id
+    if isSecret(itemID) or type(itemID) ~= "number" then return end
+    local added = lib.AddVendorLine(tip, itemID)
+    local dropped, droppedMore = lib.DropText(itemID)
+    if dropped then
+        tip:AddLine(T("droppedBy") .. ": " .. dropped, 0.6, 0.8, 1, true)
+        for _, line in ipairs(droppedMore or {}) do tip:AddLine("    " .. line, 0.6, 0.8, 1, true) end
+        added = true
+    end
+    if added then addTag(tip) end
+end
+
+-- shops seen in the game that sell the item
+-- npcID -> its spots in EzWoW - Map Finder's data (when it is loaded)
+local npcSpotIndex
+local function npcSpots(npcID)
+    if not npcSpotIndex then
+        local data = _G.EzWoWMapFinderData
+        if type(data) ~= "table" then return nil end
+        npcSpotIndex = {}
+        for _, e in ipairs(data) do
+            if type(e) == "table" and e.kind == "npc" and type(e.id) == "number" and not npcSpotIndex[e.id] then
+                npcSpotIndex[e.id] = e
+            end
+        end
+    end
+    local e = npcSpotIndex[npcID]
+    return e and type(e.spawns) == "table" and e.spawns or nil
+end
+
+-- yards from here to the closest spot of an NPC (nil: not known or elsewhere)
+local function distanceTo(here, npcID)
+    if not here then return nil end
+    local best
+    for _, sp in ipairs(npcSpots(npcID) or {}) do
+        if type(sp) == "table" and sp[1] == here[1] and type(sp[2]) == "number" and type(sp[3]) == "number" then
+            local dx, dy = sp[2] - here[2], sp[3] - here[3]
+            local d = dx * dx + dy * dy
+            if not best or d < best then best = d end
+        end
+    end
+    return best
+end
+
+-- shops that sell the item: the closest first, a few named, the rest counted
+-- (nil: no named shop)
+function lib.VendorText(itemID)
+    local list = lib.GetVendors(itemID)
+    if not list or #list == 0 then return nil end
+    local rows, seen = {}, {}
+    local here = #list > tipLimit() and playerSpot() or nil
+    for _, npcID in ipairs(list) do
+        local name = lib.SourceName("n" .. npcID)
+        if name and not seen[name] then
+            seen[name] = true
+            rows[#rows + 1] = { name = name, d = distanceTo(here, npcID) }
+        end
+    end
+    if #rows == 0 then return nil end
+    -- known distance first (closest first), the rest in their order
+    for i, row in ipairs(rows) do row.i = i end
+    table.sort(rows, function(a, b)
+        if a.d and b.d then return a.d < b.d end
+        if a.d or b.d then return a.d ~= nil end
+        return a.i < b.i
+    end)
+    -- sold all over: only how many (Shift opens the ten closest)
+    if #rows >= COMMON_DROP and not (IsShiftKeyDown and IsShiftKeyDown()) then
+        return format(T("manyVendors"), #rows) .. " · Shift", nil
+    end
+    local names = {}
+    for i = 1, math.min(#rows, tipLimit()) do names[i] = rows[i].name end
+    return namesText(names, #rows)
+end
+
+-- true when a line was added
+function lib.AddVendorLine(tip, itemID)
+    local text, more = lib.VendorText(itemID)
+    if not text then return false end
+    tip:AddLine(T("soldBy") .. ": " .. text, 0.68, 0.89, 0.42, true)
+    for _, line in ipairs(more or {}) do tip:AddLine("    " .. line, 0.68, 0.89, 0.42, true) end
+    return true
 end
 
 function lib.OnUnitTooltip(tip, data)
@@ -1850,6 +2371,7 @@ function lib.OnUnitTooltip(tip, data)
     local r = lib.GetRare(id)
     if not r or now() - (r.t or 0) < 30 then return end
     tip:AddLine(format(r.shared and T("seenShared") or T("seen"), ago(r.t)), 0.6, 0.8, 1)
+    addTag(tip)
 end
 
 -----------------------------------------------------------------------------
@@ -1870,6 +2392,8 @@ function lib.OnEvent(event, ...)
         if lib.IsEnabled() then onQuestTurnedIn(...) end
     elseif event == "LOOT_OPENED" then
         onLootOpened()
+    elseif event == "MERCHANT_SHOW" then
+        lib.OnMerchantShow()
     elseif event == "NAME_PLATE_UNIT_ADDED" then
         checkUnit(...)
     elseif event == "PLAYER_TARGET_CHANGED" then
@@ -1930,6 +2454,6 @@ if not lib.events then
 end
 
 -- events added after the first version (the frame may come from an older copy)
-for _, event in ipairs({ "CHANNEL_ROSTER_UPDATE", "CHAT_MSG_CHANNEL_JOIN", "CHAT_MSG_CHANNEL_LEAVE" }) do
+for _, event in ipairs({ "CHANNEL_ROSTER_UPDATE", "CHAT_MSG_CHANNEL_JOIN", "CHAT_MSG_CHANNEL_LEAVE", "MERCHANT_SHOW" }) do
     pcall(lib.events.RegisterEvent, lib.events, event)
 end

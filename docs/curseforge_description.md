@@ -9,11 +9,9 @@ CurseForge summary (KO): 목적지 이름·소요 시간·요금을 보여 주�
 
 When you talk to a flight master (gryphon, wyvern, bat or hippogryph), a dedicated flight map opens instead of the default one for WoW Forever. Every destination shows its name and flight time, the route lights up when you hover it, and a list next to the map lets you search, sort and keep favourites. While you fly, a timer bar counts down to landing and a small mini games window keeps you company.
 
-![Flight map, timer bar and mini games](https://raw.githubusercontent.com/qqhrqqhr2/EzWoW-FlightMap/master/docs/images/ui_en.png)
+![Flight map, settings and map looks](https://raw.githubusercontent.com/qqhrqqhr2/EzWoW-FlightMap/master/docs/images/ui_en.png)
 
-![Settings window](https://raw.githubusercontent.com/qqhrqqhr2/EzWoW-FlightMap/master/docs/images/settings_en.png)
-
-*Mock-ups rebuilt from the window sizes, coordinates, colours and strings in the addon code. In game the continent map art is shown in the background; fares and times are examples.*
+*In-game screenshots (WoW Forever, Korean client). Character and player names and chat text are blurred.*
 
 ## Features
 
@@ -79,11 +77,9 @@ Languages: English, 한국어, Deutsch, Français, Español, Русский, 简
 
 비행 조련사(그리폰·와이번·박쥐·히포그리프)와 대화하면 WoW Forever의 기본 비행 지도 대신 전용 비행 지도를 엽니다. 목적지마다 이름과 소요 시간을 보여 주고, 마우스를 올리면 비행 경로가 강조되며, 지도 옆 목록에서 검색·정렬·즐겨찾기를 할 수 있습니다. 비행 중에는 남은 시간 막대와 작은 미니게임 창이 함께합니다.
 
-![비행 지도, 남은 시간 막대와 미니게임](https://raw.githubusercontent.com/qqhrqqhr2/EzWoW-FlightMap/master/docs/images/ui_ko.png)
+![비행 지도, 설정창과 지도 모양](https://raw.githubusercontent.com/qqhrqqhr2/EzWoW-FlightMap/master/docs/images/ui_ko.png)
 
-![설정창](https://raw.githubusercontent.com/qqhrqqhr2/EzWoW-FlightMap/master/docs/images/settings_ko.png)
-
-*애드온 코드의 창 크기·좌표·색상·문구로 재현한 예시 화면입니다. 실제 창에는 게임의 대륙 지도가 배경으로 나오며, 요금과 시간은 예시입니다.*
+*실제 게임 화면입니다(WoW Forever, 한국어 클라이언트). 캐릭터 · 다른 플레이어 이름과 채팅 내용은 가렸습니다.*
 
 ## 기능
 
