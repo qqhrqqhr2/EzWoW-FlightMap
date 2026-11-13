@@ -32,7 +32,7 @@ local ADDON_NAME, ns = ...
 local type, pairs, ipairs, tonumber, tostring, pcall, next = type, pairs, ipairs, tonumber, tostring, pcall, next
 local floor, format, concat, max, min = math.floor, string.format, table.concat, math.max, math.min
 
-local LIB_VERSION = 7
+local LIB_VERSION = 8
 
 -- one table for every copy (a newer copy updates the functions in it)
 local lib = _G.EzWoW_Share
@@ -141,9 +141,31 @@ local TEXTS = {
         days = "%d일",
     },
 }
+-- An addon can give the language of these texts (owner -> function that
+-- returns a locale code, as its own language setting); the addon that draws
+-- the item lines comes first, the game language when none gives one
+lib.languageOf = lib.languageOf or {}
+function lib.SetLanguageSource(owner, fn)
+    if type(owner) ~= "string" then return end
+    lib.languageOf[owner] = (type(fn) == "function") and fn or nil
+end
+local function activeLocale()
+    local fns = lib.languageOf or {}
+    local fn = lib.itemLinesBy and fns[lib.itemLinesBy]
+    if not fn then
+        for _, f in pairs(fns) do fn = f; break end
+    end
+    if fn then
+        local ok, code = pcall(fn)
+        if ok and type(code) == "string" and code ~= "" and code ~= "auto" and code ~= "Auto" then
+            if code == "esMX" then code = "esES" elseif code == "enGB" then code = "enUS" end
+            return code
+        end
+    end
+    return (GetLocale and GetLocale()) or "enUS"
+end
 local function T(key)
-    local loc = (GetLocale and GetLocale()) or "enUS"
-    local set = TEXTS[loc] or TEXTS.enUS
+    local set = TEXTS[activeLocale()] or TEXTS.enUS
     return set[key] or TEXTS.enUS[key] or key
 end
 lib.Text = T
