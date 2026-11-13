@@ -320,7 +320,10 @@ if ns.Share and ns.Share.RegisterKind then
             local key = route:gsub("~", " | ")
             if ns.DB and type(ns.DB.times) == "table" and ns.DB.times[key] then return false end
             local store = ns.Share.Store("T")
-            if store[key] == secs then return false end
+            -- two players' times for one route differ by about a second: the one kept stays
+            -- (switching between them would count every resend as new)
+            local old = tonumber(store[key])
+            if old and math.abs(old - secs) <= 2 then return false end
             store[key] = secs
             return true
         end,

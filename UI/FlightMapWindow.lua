@@ -1372,7 +1372,11 @@ function FlightMapWindow.buildList()
         if (self:GetText() or "") ~= "" then self:SetText("") else self:ClearFocus() end
     end)
     search:SetScript("OnEnterPressed", function(self)
+        local text = (self:GetText() or ""):gsub("^%s+", ""):gsub("%s+$", "")
         self:ClearFocus()
+        -- an empty box must not take a paid flight to the top of the list
+        if text == "" then return end
+        if text ~= currentState.queryRaw then FlightMapWindow.assignQuery(text) end
         FlightMapWindow.flyToFirstResult()
     end)
     anchorTarget.search = search

@@ -26,7 +26,7 @@ local _, ns = ...
 local type, pairs, ipairs, pcall, tonumber, select = type, pairs, ipairs, pcall, tonumber, select
 local abs, huge = math.abs, math.huge
 
-local LIB_VERSION = 22
+local LIB_VERSION = 23
 
 -- one table for every copy, so a newer copy loaded later updates the
 -- functions the older addons already hold
@@ -758,25 +758,45 @@ if not lib.watcher and C_Timer and C_Timer.NewTicker then
     end)
 end
 
--- combat: the buttons go back to the game; they come back after combat
-if not lib.combatWatch then
-    lib.combatWatch = CreateFrame("Frame")
-    lib.combatWatch:RegisterEvent("PLAYER_REGEN_DISABLED")
-    lib.combatWatch:RegisterEvent("PLAYER_REGEN_ENABLED")
-    lib.combatWatch:SetScript("OnEvent", function(_, event)
-        if event == "PLAYER_REGEN_DISABLED" then
-            -- (still allowed here: the lockdown starts right after this event)
-            if lib.nav then
-                pcall(lib.nav.EnableGamePadButton, lib.nav, false)
-                if ClearOverrideBindings then pcall(ClearOverrideBindings, lib.nav) end
-                lib.boundSecure = false
-            end
-            if lib.aimOwner and ClearOverrideBindings then
-                pcall(ClearOverrideBindings, lib.aimOwner)
-                lib.aimBound = false
-            end
-        elseif lib.Capture and topWindow() then
-            lib.Capture()
+-- combat: the buttons go back to the game; after combat they come back only
+-- to what had them before (the window, or the frames on screen)
+function lib.OnCombatEvent(event)
+    if event == "PLAYER_REGEN_DISABLED" then
+        -- (still allowed here: the lockdown starts right after this event)
+        lib.combatHold = holding() and { current = lib.current, hud = lib.hudMode == true, focus = lib.GameHasFocus() } or nil
+        -- highlight, tooltip; before the lines below (bindSecure(nil) turns the buttons back on)
+        pcall(lib.Select, nil)
+        lib.hudMode = false
+        if lib.nav then
+            pcall(lib.nav.EnableGamePadButton, lib.nav, false)
+            if ClearOverrideBindings then pcall(ClearOverrideBindings, lib.nav) end
+            lib.boundSecure = false
         end
-    end)
+        if lib.aimOwner and ClearOverrideBindings then
+            pcall(ClearOverrideBindings, lib.aimOwner)
+            lib.aimBound = false
+        end
+        pcall(lib.UpdateHint)   -- hides the key guide
+        return
+    end
+    local saved = lib.combatHold
+    lib.combatHold = nil
+    if not saved or inCombat() or not lib.IsActive() or holding() then return end
+    -- a game window took the gamepad during combat: leave it there
+    if lib.GameHasFocus() and not saved.focus then return end
+    local window = topWindow()
+    local list = window and targetsOf(window) or (saved.hud and hudTargets()) or {}
+    if #list == 0 then return end
+    lib.hudMode = not window
+    lib.Capture()
+    -- re-select (and re-bind a secure button) only if it is still there
+    if saved.current and stillThere(list, saved.current) then lib.Select(saved.current) end
 end
+
+lib.combatWatch = lib.combatWatch or CreateFrame("Frame")
+pcall(lib.combatWatch.RegisterEvent, lib.combatWatch, "PLAYER_REGEN_DISABLED")
+pcall(lib.combatWatch.RegisterEvent, lib.combatWatch, "PLAYER_REGEN_ENABLED")
+-- set again by every newer copy (an older copy may have made the frame)
+lib.combatWatch:SetScript("OnEvent", function(_, event)
+    if lib.OnCombatEvent then pcall(lib.OnCombatEvent, event) end
+end)

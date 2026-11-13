@@ -310,15 +310,18 @@ local function landingName()
     return name
 end
 
-function InFlightTimerBar.startSpecialFlight(now)
+function InFlightTimerBar.startSpecialFlight(now, midFlight)
     if pending or not (ns.DB and UnitOnTaxi and UnitOnTaxi("player")) then return end
-    local mapID, x, y = playerSpot()
+    local mapID, x, y
+    -- joined mid-air: no real starting place, so no key and nothing to record
+    if not midFlight then mapID, x, y = playerSpot() end
     -- the starting place, rounded to a few yards' worth of the map
     local key = mapID and string.format("%d:%d:%d", mapID, floor(x * 50 + 0.5), floor(y * 50 + 0.5)) or nil
     if type(ns.DB.specialFlights) ~= "table" then ns.DB.specialFlights = {} end
     local known = key and ns.DB.specialFlights[key]
     pending = {
         special = true, key = key, t0 = now, start = now, seenOnTaxi = true,
+        noRecord = midFlight and true or nil,
         dest = (type(known) == "table" and known.dest) or L.BAR_FLYING,
         total = type(known) == "table" and tonumber(known.time) or nil,
         recorded = type(known) == "table" and true or nil,
@@ -447,9 +450,8 @@ restoreFrame:SetScript("OnEvent", function(_, _, isInitialLogin, isReloadingUi)
         if C_Timer and UnitOnTaxi then
             C_Timer.After(1, function()
                 if pending or not UnitOnTaxi("player") then return end
-                InFlightTimerBar.startSpecialFlight(GetTime())
                 -- started somewhere along the way: not a time to keep
-                if pending then pending.noRecord = true; pending.key = nil end
+                InFlightTimerBar.startSpecialFlight(GetTime(), true)
             end)
         end
         return

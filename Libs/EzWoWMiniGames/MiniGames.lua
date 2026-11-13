@@ -12,7 +12,7 @@
 local ADDON_NAME, ns = ...
 local type, pairs, ipairs, tostring, pcall = type, pairs, ipairs, tostring, pcall
 
-local LIB_VERSION = 3
+local LIB_VERSION = 4
 local WINDOW_NAME = "EzWoWMiniGamesWindow"
 local previous = _G.EzWoW_MiniGames
 if type(previous) == "table" and (tonumber(previous.version) or 0) >= LIB_VERSION then return end

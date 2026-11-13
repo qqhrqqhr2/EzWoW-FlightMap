@@ -125,6 +125,8 @@ local function onClick(self, button)
         paint(i)
         return
     end
+    -- a flag is not a first click: no clock, no mine placement
+    if flagged[i] and not revealed[i] then return end
     MG.StartClock()
     if not placed then placeMines(i) end
     if revealed[i] then

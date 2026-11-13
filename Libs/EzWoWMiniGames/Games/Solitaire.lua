@@ -59,6 +59,7 @@ end
 -- Moves cards from pile[index..] onto dest; returns true when legal.
 local function move(pile, index, dest, destKind)
     if pile == dest then return false end
+    if destKind ~= "foundation" and destKind ~= "tableau" then return false end
     local card = pile[index]
     if not card or not card.up then return false end
     if destKind == "foundation" then
