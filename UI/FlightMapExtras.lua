@@ -91,6 +91,14 @@ ns.IsPlaceholderFlightNode = Extras.IsPlaceholderNode
 -- [continent uiMapID] = image name; each image is 1002x668 (the world map's
 -- size) in a 1024x768 area: a 1024x512 top part and a 1024x256 bottom part.
 local MAP_IMAGES = { [1415] = "FlightMap-EK", [1414] = "FlightMap-Kalimdor" }
+-- instance 0 is the Eastern Kingdoms, 1 Kalimdor. A spot of the other
+-- continent is not drawn: asked for the wrong continent, the client can still
+-- give back a spot inside the map.
+local CONTINENT_OF_INSTANCE = { [0] = 1415, [1] = 1414 }
+local function otherContinent(instanceID, mapID)
+    local expected = CONTINENT_OF_INSTANCE[instanceID]
+    return expected ~= nil and MAP_IMAGES[mapID] ~= nil and expected ~= mapID
+end
 local IMAGE_W, IMAGE_H = 1002, 668
 
 -- Returns { w, h, tiles = { {x0,y0,x1,y1,u0,u1,v0,v1,file}, ... }, kind = "world", mapID }
@@ -210,7 +218,7 @@ local function fromWorld(snap, mapID)
         local tx, ty = taxiXY(rec, snap)
         if tx then
             local ok, cont, world = call(C_Map.GetWorldPosFromMapPos, src, CreateVector2D(tx, ty))
-            if ok and num(cont) and type(world) == "table" then
+            if ok and num(cont) and type(world) == "table" and not otherContinent(cont, mapID) then
                 local ok2, onMap, pos = call(C_Map.GetMapPosFromWorldPos, cont, world, mapID)
                 local x, y = vecXY(pos)
                 if ok2 and (onMap == nil or onMap == mapID) and inUnit(x, y) then out[rec] = { x, y }; n = n + 1 end
@@ -359,6 +367,7 @@ end
 
 local function worldToContinent(cont, wx, wy, continentID)
     if not (num(cont) and num(wx) and num(wy) and C_Map and C_Map.GetMapPosFromWorldPos and CreateVector2D) then return nil end
+    if otherContinent(cont, continentID) then return nil end
     local ok, onMap, pos = call(C_Map.GetMapPosFromWorldPos, cont, CreateVector2D(wx, wy), continentID)
     if not ok or (onMap ~= nil and onMap ~= continentID) then return nil end
     local x, y = vecXY(pos)
