@@ -489,6 +489,11 @@ function FlightRouteEngine.estimateFlightDuration(recordEntry)
     local store = ns.Share and ns.Share.Store("T")
     local shared = store and nodeKey and store[nodeKey]
     if not usable(shared) then shared = store and recordEntry.timeKey and store[recordEntry.timeKey] end
+    -- the times shipped with the addons (shared records seed)
+    if not usable(shared) then
+        local seed = ns.Share and type(ns.Share.Seed) == "function" and ns.Share.Seed("flightTimes")
+        shared = seed and ((nodeKey and seed[nodeKey]) or (recordEntry.timeKey and seed[recordEntry.timeKey]))
+    end
     if usable(shared) then return shared, true end
     if resolveFiniteNumber(recordEntry.dist) and recordEntry.dist > 0 then
         local speed = ns.DB.flightSpeeds[ns.snap.speedKey]
