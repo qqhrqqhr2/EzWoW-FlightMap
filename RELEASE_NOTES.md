@@ -1,7 +1,9 @@
-# v2.0.15
+# v2.0.16
 
 ### 한국어
-- 비행 지도 창에서 다른 대륙의 퀘스트 완료 지점이나 비행 지점이 엉뚱한 자리에 찍힐 수 있던 문제를 고쳤습니다.
+- 여러 번 갈아타는 경로의 비행 시간도 다른 사용자와 공유됩니다.
+- 비행 시간을 클라이언트 언어가 다른 사용자와도 공유합니다.
 
 ### English
-- Fixed quest turn-in spots or flight points of the other continent that could be drawn in the wrong place on the flight map window.
+- Flight times of routes with several stops are now shared too.
+- Flight times are now shared with players of every client language.
