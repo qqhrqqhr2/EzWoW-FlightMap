@@ -35,7 +35,7 @@ function InFlightTimerBar.saveActiveFlight()
     local nowEpoch = time and time()
     if not nowEpoch then return end
     ns.DB.activeFlight = {
-        key = pending.key, dest = pending.dest, dist = pending.dist, hops = pending.hops,
+        key = pending.key, nodeKey = pending.nodeKey, dest = pending.dest, dist = pending.dist, hops = pending.hops,
         hopFractions = pending.hopFractions, speedKey = pending.speedKey,
         speedMultiplier = pending.speedMultiplier, total = pending.total, recorded = pending.recorded,
         earlyLanding = pending.earlyLanding, noRecord = pending.noRecord, special = pending.special,
@@ -263,6 +263,11 @@ function InFlightTimerBar.finishFlight(now)
         local updatedVal = floor(dur + 0.5)
         local previousVal = ns.DB.times[pending.key]
         ns.DB.times[pending.key] = updatedVal
+        -- the same time by flight point numbers (shared with other players)
+        if pending.nodeKey then
+            if type(ns.DB.nodeTimes) ~= "table" then ns.DB.nodeTimes = {} end
+            ns.DB.nodeTimes[pending.nodeKey] = updatedVal
+        end
         if pending.dist and pending.dist > 0 then
             local measured = pending.dist / dur / (pending.speedMultiplier or 1)
             local previous = ns.DB.flightSpeeds[pending.speedKey]
@@ -425,7 +430,8 @@ function InFlightTimerBar.restoreActiveFlight(isReload)
     end
     local now = GetTime()
     pending = {
-        key = saved.key, dest = saved.dest, dist = tonumber(saved.dist), hops = tonumber(saved.hops),
+        key = saved.key, nodeKey = type(saved.nodeKey) == "string" and saved.nodeKey or nil,
+        dest = saved.dest, dist = tonumber(saved.dist), hops = tonumber(saved.hops),
         hopFractions = type(saved.hopFractions) == "table" and saved.hopFractions or nil,
         speedKey = saved.speedKey, speedMultiplier = tonumber(saved.speedMultiplier),
         total = tonumber(saved.total), recorded = saved.recorded, earlyLanding = saved.earlyLanding,
@@ -478,7 +484,7 @@ if hooksecurefunc and TakeTaxiNode then
         local grandTotal, recorded = estimateFlightDuration(recordEntry)
         ns.DB.recent[ns.snap.current] = recordEntry.name
         pending = {
-            key = recordEntry.timeKey, dest = recordEntry.name, dist = recordEntry.dist,
+            key = recordEntry.timeKey, nodeKey = recordEntry.nodeKey, dest = recordEntry.name, dist = recordEntry.dist,
             hops = recordEntry.hops, hopFractions = computeHopDistanceRatios(recordEntry),
             speedKey=ns.snap.speedKey, speedMultiplier=ns.snap.speedMultiplier,
             total = grandTotal, recorded = recorded, t0 = GetTime(),

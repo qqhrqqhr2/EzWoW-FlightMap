@@ -274,8 +274,10 @@ function FlightRouteEngine.captureFlightGraphSnapshot()
             route[#route+1]=recordEntry.name
             route[#route+1]="speed:" .. tostring(s.speedMultiplier)
             recordEntry.timeKey=table.concat(route," | ")
+            recordEntry.nodeKey = FlightRouteEngine.composeNodeKey(recordEntry, s)
         end
     end
+    FlightRouteEngine.adoptNamedTimes(s)
     return s
 end
 
@@ -291,34 +293,168 @@ function FlightRouteEngine.buildSnapshotHashKey(s)
 end
 
 -----------------------------------------------------------------------------
+-- Flight times by flight point number (node key): "map~faction~speed~node~...",
+-- the game's taxi node IDs from the start through every stop to the end.
+-- They are the same in every client language and short however many stops a
+-- route has. Times are kept under both keys: the name key (timeKey: older
+-- versions, the updater) and the node key (shared records).
+-----------------------------------------------------------------------------
+function FlightRouteEngine.isNodeKey(key)
+    if type(key) ~= "string" then return false end
+    local ids = key:match("^%d+~%a+~%d+%.?%d*~(%d+~[%d~]*%d)$")
+    if not ids or ids:find("~~", 1, true) then return false end
+    local n = 0
+    for id in ids:gmatch("%d+") do
+        id = tonumber(id)
+        if not id or id < 1 or id > 100000 then return false end
+        n = n + 1
+    end
+    return n >= 2 and n <= 30
+end
+
+function FlightRouteEngine.composeNodeKey(recordEntry, s)
+    local segs = recordEntry and recordEntry.segs
+    if not (s and type(segs) == "table" and #segs > 0) then return nil end
+    local first = s.bySlot[segs[1][1]]
+    local ids = { first and first.nodeID }
+    if not ids[1] then return nil end
+    for _, seg in ipairs(segs) do
+        local to = s.bySlot[seg[2]]
+        if not (to and to.nodeID) then return nil end
+        ids[#ids + 1] = to.nodeID
+    end
+    local key = table.concat({ tostring(s.flightMapID or s.mapID or ""),
+        UnitFactionGroup and UnitFactionGroup("player") or "", tostring(s.speedMultiplier),
+        table.concat(ids, "~") }, "~")
+    return FlightRouteEngine.isNodeKey(key) and key or nil
+end
+
+-- a name key ("native-taxi-v2 | map | faction | start | a>b | ... | end | speed:x")
+-- as a node key, with the point names of one flight map (nil: not all on it)
+function FlightRouteEngine.nodeKeyFromNames(key, idByName)
+    local parts = {}
+    for part in (key .. " | "):gmatch("(.-) | ") do parts[#parts + 1] = part end
+    local n = #parts
+    if n < 7 or parts[1] ~= "native-taxi-v2" then return nil end
+    local speed = parts[n]:match("^speed:(.+)$")
+    local ids = { idByName[parts[4]] }
+    if not (speed and ids[1]) then return nil end
+    local last = parts[4]
+    for i = 5, n - 2 do
+        local from, to = parts[i]:match("^(.-)>(.+)$")
+        if from ~= last or not idByName[to] then return nil end
+        ids[#ids + 1] = idByName[to]
+        last = to
+    end
+    if last ~= parts[n - 1] then return nil end
+    local nodeKey = table.concat({ parts[2], parts[3], speed, table.concat(ids, "~") }, "~")
+    return FlightRouteEngine.isNodeKey(nodeKey) and nodeKey or nil
+end
+
+-- On a flight map: its point names are kept (the shared records window shows
+-- them), and times flown before node keys get one (once per map and session).
+function FlightRouteEngine.adoptNamedTimes(s)
+    local db = ns.DB
+    if not (s and db and type(db.times) == "table") then return end
+    if type(db.nodeTimes) ~= "table" then db.nodeTimes = {} end
+    if type(db.nodeNames) ~= "table" then db.nodeNames = {} end
+    local idByName = {}
+    for _, e in ipairs(s.list) do
+        if e.nodeID and type(e.name) == "string" and e.name ~= "" then
+            if db.nodeNames[e.nodeID] ~= e.name then
+                db.nodeNames[e.nodeID] = e.name
+                FlightRouteEngine.nameIndex = nil
+            end
+            local had = idByName[e.name]
+            -- two points with one name: not used
+            idByName[e.name] = (had == nil or had == e.nodeID) and e.nodeID or false
+        end
+    end
+    local mapKey = tostring(s.flightMapID or s.mapID or "taxi")
+    FlightRouteEngine.adoptedMaps = FlightRouteEngine.adoptedMaps or {}
+    if FlightRouteEngine.adoptedMaps[mapKey] then return end
+    FlightRouteEngine.adoptedMaps[mapKey] = true
+    local prefix = "native-taxi-v2 | " .. mapKey .. " | "
+    for key, secs in pairs(db.times) do
+        if type(key) == "string" and type(secs) == "number" and key:sub(1, #prefix) == prefix then
+            local nodeKey = FlightRouteEngine.nodeKeyFromNames(key, idByName)
+            if nodeKey and db.nodeTimes[nodeKey] == nil then db.nodeTimes[nodeKey] = secs end
+        end
+    end
+end
+
+-- point name -> node ID over every flight map seen (false: two points share it)
+function FlightRouteEngine.idByNodeName()
+    if FlightRouteEngine.nameIndex then return FlightRouteEngine.nameIndex end
+    local index = {}
+    local names = ns.DB and type(ns.DB.nodeNames) == "table" and ns.DB.nodeNames or {}
+    for id, name in pairs(names) do
+        if type(id) == "number" and type(name) == "string" then
+            local had = index[name]
+            index[name] = (had == nil or had == id) and id or false
+        end
+    end
+    FlightRouteEngine.nameIndex = index
+    return index
+end
+
+function FlightRouteEngine.clientLocale()
+    local loc = (GetLocale and GetLocale()) or "enUS"
+    if loc == "esMX" then loc = "esES" elseif loc == "enGB" then loc = "enUS" end
+    return loc
+end
+
+-----------------------------------------------------------------------------
 -- Flight times shared with other players of the EzWoW addons
--- (Libs/EzWoWShare, kind "T"): "seconds,route" where the route is the
--- flight's time key with " | " written as "~". Route names are in the
--- client's language, so only players with the same language exchange them.
+-- (Libs/EzWoWShare, kind "T"): "n<seconds>,<node key>", exchanged between all
+-- client languages. Older versions read only "<language>,<seconds>,<name key
+-- with '~' for ' | '>" from players with their client language: those are sent
+-- as well (when under 200 bytes) and taken from them; a name key that the
+-- point names seen here turn into a node key is kept as that.
 -- A time this character flew itself is always used first.
 -----------------------------------------------------------------------------
 if ns.Share and ns.Share.RegisterKind then
     ns.Share.RegisterKind("T", {
-        localized = true,
         own = function()
             local out = {}
-            local times = ns.DB and ns.DB.times
-            if type(times) ~= "table" then return out end
-            for key, secs in pairs(times) do
+            local db = ns.DB
+            if type(db) ~= "table" then return out end
+            for key, secs in pairs(type(db.nodeTimes) == "table" and db.nodeTimes or {}) do
+                if type(secs) == "number" and secs >= 5 and secs <= 3600 and FlightRouteEngine.isNodeKey(key) then
+                    out[#out + 1] = "n" .. math.floor(secs + 0.5) .. "," .. key
+                end
+            end
+            -- for older versions: the same times by names, as they send them
+            local lang = FlightRouteEngine.clientLocale()
+            for key, secs in pairs(type(db.times) == "table" and db.times or {}) do
                 if type(key) == "string" and type(secs) == "number" and secs >= 5 and secs <= 3600
                     and not key:find("[;~]") then
                     local route = key:gsub(" | ", "~")
-                    if not route:find("|", 1, true) then out[#out + 1] = math.floor(secs + 0.5) .. "," .. route end
+                    local body = lang .. "," .. math.floor(secs + 0.5) .. "," .. route
+                    if not route:find("|", 1, true) and #body < 200 then out[#out + 1] = body end
                 end
             end
             return out
         end,
         receive = function(body)
-            local secs, route = body:match("^(%d+),(.+)$")
+            local secs, key = body:match("^n(%d+),(.+)$")
+            if secs then
+                if not FlightRouteEngine.isNodeKey(key) then return false end
+                if ns.DB and type(ns.DB.nodeTimes) == "table" and ns.DB.nodeTimes[key] then return false end
+            else
+                local lang, route
+                lang, secs, route = body:match("^(%a%a%u%u),(%d+),(.+)$")
+                if not lang or lang ~= FlightRouteEngine.clientLocale() or route:find("[\1-\31\127|]") then return false end
+                key = route:gsub("~", " | ")
+                if ns.DB and type(ns.DB.times) == "table" and ns.DB.times[key] then return false end
+                local nodeKey = FlightRouteEngine.nodeKeyFromNames(key, FlightRouteEngine.idByNodeName())
+                if nodeKey then
+                    if ns.DB and type(ns.DB.nodeTimes) == "table" and ns.DB.nodeTimes[nodeKey] then return false end
+                    key = nodeKey
+                end
+            end
             secs = tonumber(secs)
-            if not secs or secs < 5 or secs > 3600 or route:find("[\1-\31\127|]") then return false end
-            local key = route:gsub("~", " | ")
-            if ns.DB and type(ns.DB.times) == "table" and ns.DB.times[key] then return false end
+            if not secs or secs < 5 or secs > 3600 then return false end
             local store = ns.Share.Store("T")
             -- two players' times for one route differ by about a second: the one kept stays
             -- (switching between them would count every resend as new)
@@ -327,16 +463,33 @@ if ns.Share and ns.Share.RegisterKind then
             store[key] = secs
             return true
         end,
+        -- the shared records window: the route by point names
+        describe = function(body)
+            local secs, key = body:match("^n(%d+),(.+)$")
+            if not (secs and FlightRouteEngine.isNodeKey(key)) then return nil end
+            local names = ns.DB and type(ns.DB.nodeNames) == "table" and ns.DB.nodeNames or {}
+            local stops = {}
+            for id in key:match("^%d+~%a+~[%d%.]+~(.+)$"):gmatch("%d+") do
+                stops[#stops + 1] = names[tonumber(id)] or ("#" .. id)
+            end
+            secs = tonumber(secs) or 0
+            return string.format("%s · %d:%02d", table.concat(stops, " > "), math.floor(secs / 60), secs % 60)
+        end,
     })
 end
 
 function FlightRouteEngine.estimateFlightDuration(recordEntry)
     if not (ns.snap and ns.snap.current and recordEntry) then return end
-    local recordItem = ns.DB.times[recordEntry.timeKey]
-    if resolveFiniteNumber(recordItem) and recordItem >= 5 and recordItem <= 3600 then return recordItem, true end
+    local nodeKey = recordEntry.nodeKey
+    local function usable(v) return resolveFiniteNumber(v) and v >= 5 and v <= 3600 end
+    local own = ns.DB.times[recordEntry.timeKey]
+    if not usable(own) then own = nodeKey and type(ns.DB.nodeTimes) == "table" and ns.DB.nodeTimes[nodeKey] end
+    if usable(own) then return own, true end
     -- a time other players of the EzWoW addons flew on this route (Libs/EzWoWShare)
-    local shared = ns.Share and recordEntry.timeKey and ns.Share.Store("T")[recordEntry.timeKey]
-    if resolveFiniteNumber(shared) and shared >= 5 and shared <= 3600 then return shared, true end
+    local store = ns.Share and ns.Share.Store("T")
+    local shared = store and nodeKey and store[nodeKey]
+    if not usable(shared) then shared = store and recordEntry.timeKey and store[recordEntry.timeKey] end
+    if usable(shared) then return shared, true end
     if resolveFiniteNumber(recordEntry.dist) and recordEntry.dist > 0 then
         local speed = ns.DB.flightSpeeds[ns.snap.speedKey]
         if not resolveFiniteNumber(speed) or speed < 8 or speed > 120 then speed = 30.4 end

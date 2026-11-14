@@ -36,7 +36,7 @@ local ADDON_NAME, ns = ...
 local type, pairs, ipairs, tonumber, tostring, pcall, next = type, pairs, ipairs, tonumber, tostring, pcall, next
 local floor, format, concat, max, min = math.floor, string.format, table.concat, math.max, math.min
 
-local LIB_VERSION = 10
+local LIB_VERSION = 11
 
 -- one table for every copy (a newer copy updates the functions in it)
 local lib = _G.EzWoW_Share
@@ -799,29 +799,61 @@ function lib.GetDropSources(itemID)
     return lib.reverseDrops[itemID]
 end
 
--- Name lookups other addons add: function(kind, id) -> name or nil, where kind
--- is "npc" or "object" (an addon's name tables in the player's language).
+-- Name lookups other addons add: function(kind, id, locale) -> name or nil,
+-- where kind is "npc" or "object" (an addon's name tables; the locale asked
+-- for may be ignored).
 lib.nameResolvers = lib.nameResolvers or {}
 
-function lib.SourceName(src)
+-- (in a block: the file is at Lua's limit of 200 locals)
+do
+-- short language codes some addons save, and the game's variants
+local LOCALE_CODES = {
+    ko = "koKR", en = "enUS", de = "deDE", fr = "frFR", es = "esES", ru = "ruRU",
+    cn = "zhCN", tw = "zhTW", enGB = "enUS", esMX = "esES",
+}
+local function localeCode(code)
+    if type(code) ~= "string" or code == "" or code == "auto" or code == "Auto" then return nil end
+    return LOCALE_CODES[code] or code
+end
+
+-- Name of a source ("n" NPC ID, "o" object ID) in the language given (an
+-- addon's own language setting) or else the language of this library's texts.
+-- Names seen in the game are in the game's language: they come first only
+-- when that is the language asked for.
+function lib.SourceName(src, locale)
     if type(src) ~= "string" then return nil end
-    local name = lib.Data().names[src]
-    if name then return name end
+    locale = localeCode(locale) or localeCode(activeLocale()) or "enUS"
+    local seen = lib.Data().names[src]
+    if seen and locale == (localeCode(GetLocale and GetLocale()) or "enUS") then return seen end
     local id = tonumber(src:sub(2))
-    if not id then return nil end
+    if not id then return seen end
     local kind = src:sub(1, 1) == "n" and "npc" or "object"
+    local function ask(fn, ...)
+        local ok, n = pcall(fn, kind, id, ...)
+        if ok and type(n) == "string" and not isSecret(n) and n ~= "" then return n end
+        return nil
+    end
+    -- the map addon has names in every language; its older versions answer in
+    -- their own language only, so they are asked after the others
     local api = _G.EzWoWMapFinderAPI
-    if api and type(api.NameByID) == "function" then
-        local ok, n = pcall(api.NameByID, kind, id)
-        if ok and type(n) == "string" and n ~= "" then return n end
+    local mapName = type(api) == "table" and type(api.NameByID) == "function" and api.NameByID or nil
+    local mapTakesLocale = mapName and api.NameByIDTakesLocale == true
+    if mapTakesLocale then
+        local n = ask(mapName, locale)
+        if n then return n end
     end
     for _, resolve in ipairs(lib.nameResolvers) do
         if type(resolve) == "function" then
-            local ok, n = pcall(resolve, kind, id)
-            if ok and type(n) == "string" and n ~= "" and not isSecret(n) then return n end
+            local n = ask(resolve, locale)
+            if n then return n end
         end
     end
-    return nil
+    if mapName and not mapTakesLocale then
+        local n = ask(mapName)
+        if n then return n end
+    end
+    return seen
+end
 end
 
 -----------------------------------------------------------------------------
@@ -1321,6 +1353,8 @@ local V2_KINDS = { R = true, L = true, G = true }
 --                                  players must agree for a fact; see lib.Vote)
 --   spec.localized = true       -> only players with the same client language
 --                                  exchange it (records holding names)
+--   spec.describe(body)         -> text for the shared records window, or nil
+--                                  (then the general text of the kind)
 -- Codes in use: M shops, Z dungeon creatures, W quest rewards, U trainer spells,
 -- J object names (this file); F fishing spots (Smart Fishing), T flight times
 -- (Flight Map), N NPC spots (Map Finder), Q quest offers (Quest), B boss areas
@@ -3277,6 +3311,12 @@ local function setupWindow()
 
     -- one record of a message as text (the message formats are above)
     local function describe(kind, body)
+        -- a kind another addon registered may describe its own records
+        local spec = lib.kinds[kind]
+        if spec and type(spec.describe) == "function" then
+            local ok, text = pcall(spec.describe, body)
+            if ok and type(text) == "string" and text ~= "" then return text end
+        end
         local _, rest = body:match("^(%a%a%u%u),(.+)$")
         if rest then body = rest end
         if kind == "E" or kind == "S" then

@@ -147,6 +147,8 @@ function ns.InitDB()
         CONST_DB.lang = "auto"
     end
     if type(CONST_DB.times) ~= "table" then CONST_DB.times = {} end
+    if type(CONST_DB.nodeTimes) ~= "table" then CONST_DB.nodeTimes = {} end
+    if type(CONST_DB.nodeNames) ~= "table" then CONST_DB.nodeNames = {} end
     if type(CONST_DB.flightSpeeds) ~= "table" then CONST_DB.flightSpeeds = {} end
     if type(CONST_DB.favorites) ~= "table" then CONST_DB.favorites = {} end
     if type(CONST_DB.recent) ~= "table" then CONST_DB.recent = {} end
