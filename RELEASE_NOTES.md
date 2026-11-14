@@ -1,9 +1,7 @@
-# v2.0.16
+# v2.0.17
 
 ### 한국어
-- 여러 번 갈아타는 경로의 비행 시간도 다른 사용자와 공유됩니다.
-- 비행 시간을 클라이언트 언어가 다른 사용자와도 공유합니다.
+- EzWoW 사용자들이 잰 비행 시간을 기본 데이터로 넣어, 직접 타 보지 않은 경로도 처음부터 실제 시간이 나옵니다.
 
 ### English
-- Flight times of routes with several stops are now shared too.
-- Flight times are now shared with players of every client language.
+- Flight times measured by EzWoW users are now built in, so routes you have not flown show real times from the start.
