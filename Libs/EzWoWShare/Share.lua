@@ -11,12 +11,15 @@
 --          what a quest item drops from (the quest addon adds the last two)
 --   rare   where and when a rare monster was seen
 --   drops  which creature / object an item was looted from
--- How records travel:
---   * to the party, raid and guild as addon messages;
---   * to the hidden data channel as addon messages (everyone in it at once);
---   * to the other players of the data channel as addon whispers too, one
---     player at a time, so each gets every record once a session. Whispers
---     are taken only from players on the channel's list.
+-- How records travel (see "Messages: sending"):
+--   * this character's records are numbered in the order they were found;
+--     a hello on the hidden data channel, the guild and the party tells how
+--     far they go, and each player asks for the ones it does not have yet
+--     (an addon whisper back); records found now go to everyone at once;
+--   * so a record goes to a player once, not again and again. Once in 7 to
+--     14 days a player takes everything from the start again.
+--   * copies up to version 12 still get the records they lack in their own
+--     form while their players are around.
 -- Received records:
 --   * facts by ID (quest NPCs, drops) wait until enough different players
 --     sent the same one: one from the party, raid or guild, two from the
@@ -36,7 +39,7 @@ local ADDON_NAME, ns = ...
 local type, pairs, ipairs, tonumber, tostring, pcall, next = type, pairs, ipairs, tonumber, tostring, pcall, next
 local floor, format, concat, max, min = math.floor, string.format, table.concat, math.max, math.min
 
-local LIB_VERSION = 12
+local LIB_VERSION = 13
 
 -- one table for every copy (a newer copy updates the functions in it)
 local lib = _G.EzWoW_Share
@@ -158,6 +161,12 @@ local TEXTS = {
         descStart = "%s · starts at %s", descEnd = "%s · ends at %s", descSpot = "%s · objective %d spot",
         descFrom = "%s (from %s)", descRare = "%s · %s, %s ago", descShop = "%s: %d items", descIn = "%s · %s",
         descMob = "%s (monster)", descFish = "%s: %s x%d", descFlight = "%s · %d:%02d",
+        -- record numbers and versions
+        syncLine = "Records in step: mine %d (numbered up to %d), players %d (all taken %d), taking from %d, waiting %d, giving to %d.",
+        syncShort = "taking from %d, waiting %d, giving to %d",
+        versions = "Versions heard this session: %s", verOld = "v12 or older", colVersion = "Version",
+        tipVersion = "Sharing version %s", tipAddons = "Addons: %s", tipTaken = "Records taken: up to %d of %d",
+        kindY = "Records (in order)",
     },
     koKR = {
         on = "데이터 공유를 켰습니다.",
@@ -234,6 +243,12 @@ local TEXTS = {
         descStart = "%s · 시작: %s", descEnd = "%s · 완료: %s", descSpot = "%s · 목표 %d 장소",
         descFrom = "%s (출처: %s)", descRare = "%s · %s, %s 전", descShop = "%s: 물건 %d개", descIn = "%s · %s",
         descMob = "%s (몬스터)", descFish = "%s: %s x%d", descFlight = "%s · %d:%02d",
+        -- 기록 번호와 버전
+        syncLine = "기록 맞추기: 내 기록 %d개 (번호 %d까지), 상대 %d명 (다 받음 %d명), 받는 중 %d명, 받을 차례 %d명, 보내는 중 %d명.",
+        syncShort = "받는 중 %d명, 받을 차례 %d명, 보내는 중 %d명",
+        versions = "이번 접속에 본 버전: %s", verOld = "v12 이하", colVersion = "버전",
+        tipVersion = "공유 버전 %s", tipAddons = "애드온: %s", tipTaken = "받은 기록: 번호 %d까지 (상대 %d까지)",
+        kindY = "기록 (번호 순서)",
     },
 }
 -- An addon can give the language of these texts (owner -> function that
@@ -288,14 +303,14 @@ local QUEST_KEYS = { "questEnders", "questGivers", "questEventSpots", "questEven
     "questDropItems", "questDropSources", "questShareInbox" }
 
 local function fresh()
-    local d = { v = 1, settings = {}, quest = {}, rare = {}, drops = {}, gather = {}, names = {}, inbox = {}, ext = {} }
+    local d = { v = 1, settings = {}, quest = {}, rare = {}, drops = {}, gather = {}, names = {}, inbox = {}, ext = {}, sync = {} }
     for _, key in ipairs(QUEST_KEYS) do d.quest[key] = {} end
     return d
 end
 
 local function shape(d)
     if type(d) ~= "table" then return fresh() end
-    for _, key in ipairs({ "settings", "quest", "rare", "drops", "gather", "names", "inbox", "ext" }) do
+    for _, key in ipairs({ "settings", "quest", "rare", "drops", "gather", "names", "inbox", "ext", "sync" }) do
         if type(d[key]) ~= "table" then d[key] = {} end
     end
     for _, key in ipairs(QUEST_KEYS) do
@@ -761,6 +776,32 @@ function lib.Seed(kind)
     return type(t) == "table" and t or nil
 end
 
+-- whether the shipped records hold <value> in the list of <key> (drops: "n123"
+-- -> item IDs, vendors: npcID -> item IDs): such a fact needs no votes
+do
+    local sets = {}
+    function lib.SeedHas(kind, key, value)
+        local seed = lib.Seed(kind)
+        if not seed or key == nil then return false end
+        local byKey = sets[kind]
+        if not byKey or byKey.seed ~= seed then
+            byKey = { seed = seed, of = {} }
+            sets[kind] = byKey
+        end
+        local set = byKey.of[key]
+        if set == nil then
+            set = false
+            local list = seed[key]
+            if type(list) == "table" then
+                set = {}
+                for _, v in ipairs(list) do set[v] = true end
+            end
+            byKey.of[key] = set
+        end
+        return set and set[value] == true or false
+    end
+end
+
 -- rare monster sighting: { m = mapID, x, y, t = time, shared = true|nil } or nil
 function lib.GetRare(npcID)
     local r = lib.Data().rare[tonumber(npcID) or 0]
@@ -865,11 +906,12 @@ local PREFIX = "EzWoWQData"           -- at most 16 characters (the quest addon'
 local CHANNEL_NAME = "EzWoWQuestData"
 local MAX_MSG = 240                   -- addon messages are limited to 255 bytes
 local SEND_EVERY = 8                  -- seconds between outgoing messages
-local RESEND_AFTER = 20 * 60          -- everything is sent again after this long
 local CONFIRM_GROUP, CONFIRM_PUBLIC = 1, 2
-local INBOX_DAYS = 14
-local INBOX_MAX = 6000
-local RECEIVE_PER_MINUTE = 600        -- records accepted from one sender (the same ones may come by channel and whisper)
+-- a row waits this long after its last new vote; when the inbox is full the
+-- oldest rows make room (records come once now, so a vote is not refused)
+local INBOX_DAYS = 21
+local INBOX_MAX, INBOX_KIND = 8000, 5000
+local RECEIVE_PER_MINUTE = 600        -- records taken from one sender a minute (answers are paced below this)
 local RARE_SEND_AGE = 2 * 3600        -- own sightings younger than this are sent
 local RARE_KEEP_AGE = 6 * 3600        -- received sightings older than this are not kept
 
@@ -1051,9 +1093,11 @@ end
 
 -- inbox rows: key -> { t = last new vote, v = { [value] = { s, n, p } } }
 -- quest facts keep the quest addon's inbox ("v2:" keys); other kinds use "v1:".
--- A row lives only until its fact is stored (voteDone) or 14 days after its last
--- new vote; each kind ("L", "M", "W"... the key's first part) may hold at most
--- 2500 rows, so one busy kind cannot fill the inbox for the others.
+-- A row lives only until its fact is stored (voteDone) or INBOX_DAYS after its
+-- last new vote; each kind ("L", "M", "W"... the key's first part) may hold at
+-- most INBOX_KIND rows, so one busy kind cannot fill the inbox for the others.
+-- Rows of facts this character has by now (stored, or shipped with the addons)
+-- are let go when the inbox is first used in a session.
 -- inboxCount[which] = rows; inboxCount.kinds[which][kind] = rows of that kind
 local inboxCount = { kinds = {} }
 
@@ -1064,8 +1108,11 @@ local function inboxOf(which)
     if not inboxCount[which] then
         local n, kinds = 0, {}
         local oldest = now() - INBOX_DAYS * 86400
+        local known = lib.InboxKnown
         for key, row in pairs(box) do
             if type(key) ~= "string" or key:sub(1, #tag) ~= tag or type(row) ~= "table" or (row.t or 0) < oldest then
+                box[key] = nil
+            elseif known and known(which, key:sub(#tag + 1), row) then
                 box[key] = nil
             else
                 n = n + 1
@@ -1078,6 +1125,22 @@ local function inboxOf(which)
     return box, tag
 end
 
+-- the inbox is full (or one kind of it): its oldest tenth makes room
+local function makeRoom(which, kind)
+    local box, tag = inboxOf(which)
+    local rows = {}
+    local prefix = kind and (tag .. kind .. ":")
+    for key, row in pairs(box) do
+        if not prefix or key:sub(1, #prefix) == prefix then
+            rows[#rows + 1] = { key, type(row) == "table" and tonumber(row.t) or 0 }
+        end
+    end
+    table.sort(rows, function(a, b) return a[2] < b[2] end)
+    for i = 1, min(#rows, max(1, floor(#rows / 10))) do box[rows[i][1]] = nil end
+    -- counted again (and rows of facts had by now let go) on the next use
+    inboxCount[which], inboxCount.kinds[which] = nil, nil
+end
+
 -- one sender's vote for a value. Returns the entry when this vote counted, or,
 -- with again (a group message: one player is enough), the entry this sender
 -- voted for before; nil otherwise. A repeat does not keep the row alive.
@@ -1088,8 +1151,13 @@ local function voteValue(which, key, value, hash, spot, again)
     local entry = row and row.v and row.v[value]
     if entry and entry.s[hash] then return again and entry or nil end
     if not row then
-        local kinds, k = inboxCount.kinds[which], key:sub(#tag + 1):match("^([^:]+):") or "?"
-        if inboxCount[which] >= INBOX_MAX or (kinds[k] or 0) >= 2500 then return nil end
+        local k = key:sub(#tag + 1):match("^([^:]+):") or "?"
+        if inboxCount[which] >= INBOX_MAX or (inboxCount.kinds[which][k] or 0) >= INBOX_KIND then
+            makeRoom(which, (inboxCount.kinds[which][k] or 0) >= INBOX_KIND and k or nil)
+            box = inboxOf(which)
+            if inboxCount[which] >= INBOX_MAX or (inboxCount.kinds[which][k] or 0) >= INBOX_KIND then return nil end
+        end
+        local kinds = inboxCount.kinds[which]
         row = {}
         box[key] = row
         inboxCount[which] = inboxCount[which] + 1
@@ -1126,23 +1194,32 @@ local function receiveQuestNpc(code, storeName, body, hash, needed)
     q, id = intIn(q, 1, 1000000), intIn(id, 1, 10000000)
     if not (q and id) then return end
     local value = (k == "n" and "npc:" or "object:") .. id
-    local entry = voteValue("quest", code .. ":" .. q, value, hash, parseSpot(rest), needed == CONFIRM_GROUP)
+    local voteKey = code .. ":" .. q
+    local entry = voteValue("quest", voteKey, value, hash, parseSpot(rest), needed == CONFIRM_GROUP)
     if not entry then return end
+    local store = lib.Data().quest[storeName]
+    local current = store[q]
+    if type(current) == "table" and current.key == value then
+        -- had it already: the count goes with the stored value, and a row that
+        -- backs only this value is let go (another value keeps its row)
+        if current.shared then current.n = max(tonumber(current.n) or 0, entry.n) end
+        local box, tag = inboxOf("quest")
+        local row = box[tag .. voteKey]
+        local only = type(row) == "table" and type(row.v) == "table"
+        for v in pairs(only and row.v or {}) do
+            if v ~= value then only = false break end
+        end
+        if only then voteDone("quest", voteKey) end
+        return
+    end
     if entry.n < needed then
-        -- waits for more players (unless this character has that already)
-        local current = lib.Data().quest[storeName][q]
-        if not (type(current) == "table" and (current.key == value or not current.shared)) then
+        -- waits for more players (unless this character has its own record)
+        if not (type(current) == "table" and not current.shared) then
             activity.pend = activity.pend + 1
         end
         return
     end
-    local store = lib.Data().quest[storeName]
-    local current = store[q]
     if type(current) == "table" and not current.shared then return end
-    if type(current) == "table" and current.key == value then
-        current.n = entry.n
-        return
-    end
     -- a different value replaces a confirmed one only when more players report it
     if type(current) == "table" and entry.n <= (current.n or 0) then return end
     store[q] = { key = value, spot = entry.p, shared = true, n = entry.n }
@@ -1235,6 +1312,7 @@ local function receiveDrop(body, hash, needed)
     if not (src and itemID and intIn(src:sub(2), 1, 10000000)) then return end
     local drops = lib.Data().drops
     if type(drops[src]) == "table" and drops[src][itemID] then return end   -- had it already: no vote
+    if lib.SeedHas("drops", src, itemID) then return end                     -- shipped already: no vote
     local voteKey = "L:" .. src .. ":" .. itemID
     local entry = voteValue("other", voteKey, "1", hash, nil, needed == CONFIRM_GROUP)
     if not entry then return end
@@ -1536,9 +1614,10 @@ lib.RegisterKind(VENDOR_KIND, {
         local any, waiting = false, false
         for code in list:gmatch("[^%.]+") do
             local itemID = tonumber(code, 36)
-            -- what this character saw or what was confirmed already: no vote
+            -- what this character saw, confirmed already or shipped: no vote
             if itemID and itemID > 0 and itemID < 10000000 and not own[itemID]
-                and not (row and type(row.got) == "table" and row.got[itemID]) then
+                and not (row and type(row.got) == "table" and row.got[itemID])
+                and not lib.SeedHas("vendors", npcID, itemID) then
                 local key = "M:" .. npcID .. ":" .. itemID
                 local n = lib.Vote(key, "1", hash, needed)
                 if n and n >= (tonumber(needed) or 2) then
@@ -1664,8 +1743,9 @@ do
             local result = false
             local t = placeStore()
             local row = type(t[npcID]) == "table" and t[npcID] or nil
-            -- this character's own note or a side confirmed already: no vote
-            if not (row and (row.side or row.got)) then
+            -- this character's own note, a side confirmed already or shipped: no vote
+            local shipped = lib.Seed("sides")
+            if not (row and (row.side or row.got)) and not (shipped and shipped[npcID] == side) then
                 local key = "P:" .. npcID
                 local n = lib.Vote(key, side, hash, needed)
                 if n and n >= (tonumber(needed) or 2) then
@@ -1739,6 +1819,8 @@ lib.RegisterKind(INSTANCE_KIND, {
         local t = lib.Store(INSTANCE_KIND)
         local row = type(t[npcID]) == "table" and t[npcID] or {}
         if row.got == mapID or row.own == mapID then return false end   -- had it already: no vote
+        local shipped = lib.Seed("instances")
+        if shipped and shipped[npcID] == mapID then return false end     -- shipped already: no vote
         local n = lib.Vote("Z:" .. npcID, tostring(mapID), hash, needed)
         if not n then return false end
         if n < (tonumber(needed) or 2) then return "wait" end
@@ -1918,11 +2000,16 @@ local function setupMoreKinds()
             local t = lib.Store(REWARD_KIND)
             local row0 = type(t[q]) == "table" and t[q] or {}
             local mine = { r = setOf(type(row0.own) == "table" and row0.own.r), c = setOf(type(row0.own) == "table" and row0.own.c) }
-            -- had already: seen by this character, or confirmed before
+            -- had already: seen by this character, confirmed before or shipped
+            local shipped = lib.Seed("rewards")
+            shipped = shipped and type(shipped[q]) == "table" and shipped[q] or nil
             local function have(part)
+                local seedSet = {}
+                for _, id in ipairs(shipped and type(shipped[part]) == "table" and shipped[part] or {}) do seedSet[id] = true end
                 return function(id)
                     local row = t[q]
-                    return mine[part][id] or (type(row) == "table" and type(row.got) == "table" and row.got[id] == part)
+                    return mine[part][id] or seedSet[id]
+                        or (type(row) == "table" and type(row.got) == "table" and row.got[id] == part)
                 end
             end
             local function store(part)
@@ -2114,6 +2201,103 @@ local function setupMoreKinds()
     })
 end
 setupMoreKinds()
+end
+
+-----------------------------------------------------------------------------
+-- Inbox rows of facts this character has by now (its own record, a stored one,
+-- or one shipped with the addons) are let go when the inbox is first used in a
+-- session: a saved copy joined in can bring back rows that were done.
+-- key: the row key without its tag ("L:n123:456", "E:1234", ...)
+-----------------------------------------------------------------------------
+do
+    local function inList(list, id)
+        if type(list) ~= "table" or not id then return false end
+        if list[id] == true then return true end
+        for _, v in ipairs(list) do
+            if v == id then return true end
+        end
+        return false
+    end
+
+    local function row(code, id)
+        local r = lib.Store(code)[tonumber(id) or 0]
+        return type(r) == "table" and r or nil
+    end
+
+    local checks = {}
+    function checks.L(src, item)
+        item = tonumber(item)
+        local items = lib.Data().drops[src]
+        return (type(items) == "table" and items[item] ~= nil) or lib.SeedHas("drops", src, item)
+    end
+    function checks.M(npc, item)
+        local r = row("M", npc)
+        item = tonumber(item)
+        if r and (inList(r.own, item) or (type(r.got) == "table" and r.got[item] ~= nil)) then return true end
+        return lib.SeedHas("vendors", tonumber(npc), item)
+    end
+    function checks.P(npc)
+        local r = row("P", npc)
+        return r ~= nil and (r.side ~= nil or r.got ~= nil)
+    end
+    function checks.Z(npc)
+        local r = row("Z", npc)
+        return r ~= nil and (r.own ~= nil or r.got ~= nil)
+    end
+    function checks.W(q, item)
+        local r = row("W", q)
+        item = tonumber(item)
+        if not r then return false end
+        local own = type(r.own) == "table" and r.own or {}
+        return inList(own.r, item) or inList(own.c, item) or (type(r.got) == "table" and r.got[item] ~= nil)
+    end
+    function checks.U(npc, spell)
+        local r = row("U", npc)
+        spell = tonumber(spell)
+        return r ~= nil and (inList(r.own, spell) or (type(r.got) == "table" and r.got[spell] == true))
+    end
+    function checks.J(id)
+        local r = row("J", id)
+        return r ~= nil and (r.own ~= nil or r.got ~= nil)
+    end
+
+    local QUEST_STORES = { E = "questEnders", S = "questGivers" }
+    local function questKnown(key, inboxRow)
+        local code, rest = key:match("^(%u):(.+)$")
+        local q = lib.Data().quest
+        if QUEST_STORES[code] then
+            -- only when every value of the row is the stored one
+            local cur = q[QUEST_STORES[code]][tonumber(rest) or 0]
+            if type(cur) ~= "table" or type(inboxRow.v) ~= "table" then return false end
+            for v in pairs(inboxRow.v) do
+                if v ~= cur.key then return false end
+            end
+            return true
+        elseif code == "I" then
+            local item, k, id = rest:match("^(%d+):([no]):(%d+)$")
+            local t = item and q.questDropItems[tonumber(item)]
+            return k == "n" and type(t) == "table" and t[tonumber(id)] ~= nil
+        elseif code == "D" then
+            local name, id = rest:match("^(.+):(%d+)$")
+            local t = name and q.questDropSources[name]
+            return type(t) == "table" and t[tonumber(id)] ~= nil
+        end
+        return false
+    end
+
+    function lib.InboxKnown(which, key, inboxRow)
+        if type(key) ~= "string" or type(inboxRow) ~= "table" then return false end
+        local ok, known
+        if which == "quest" then
+            ok, known = pcall(questKnown, key, inboxRow)
+        else
+            local code, a, b = key:match("^(%u):([^:]+):?(.*)$")
+            local fn = code and checks[code]
+            if not fn then return false end
+            ok, known = pcall(fn, a, b)
+        end
+        return ok and known == true
+    end
 end
 
 -- where an object (herb, vein, chest...) was looted: list of { continent, x, y }
@@ -2576,6 +2760,19 @@ local function setupActivity()
         local p = person(data(), name)
         if p then p.notFound = (p.notFound or 0) + 1 end
     end
+
+    -- the sharing version a player has (and the EzWoW addons it told);
+    -- weak: only noted when no newer version was heard from that player
+    function activity.version(sender, ver, addons, weak)
+        local p = person(data(), sender)
+        if not p then return end
+        ver = tostring(ver or "")
+        if ver == "" then return end
+        if weak and p.ver and p.ver ~= ver then return end
+        p.ver = ver
+        if type(addons) == "string" and addons ~= "" then p.addons = addons end
+        p.verAt = now()
+    end
 end
 setupActivity()
 end
@@ -2646,6 +2843,11 @@ function lib.OnAddonMessage(prefix, text, channel, sender)
         lib.OnPing(text, sender)
         return
     end
+    -- hello, ask and numbered records (see "Messages: sending")
+    if text:find("^3[HRY]|") then
+        if not isMe(sender) and lib.SyncMessage then lib.SyncMessage(text, channel, sender) end
+        return
+    end
     if isMe(sender) or not text:find("^%d%u|.") then return end
     if channel == "WHISPER" then
         -- whispers are taken only from the players of the data channel
@@ -2664,6 +2866,13 @@ end
 accept = function(text, channel, sender)
     local version, kind, payload = text:match("^(%d)(%u)|(.+)$")
     if not kind or not payload then return end
+    -- the old form from a newer copy (for older copies around): its records
+    -- come numbered as well, so this one passes it by (";~13", with names
+    -- ";koKR,~13")
+    if payload:find(";~%d+$") or payload:find(";%a%a%u%u,~%d+$") then
+        if lib.SyncNewerPeer then lib.SyncNewerPeer(sender, channel) end
+        return
+    end
     -- a player whose whisper came in can be whispered again (a channel message
     -- only shows that they are in the channel, not that a whisper reaches them)
     local fromKey = baseName(sender)
@@ -2671,6 +2880,8 @@ accept = function(text, channel, sender)
         unreachableCount[fromKey] = nil; unreachable[fromKey] = nil
     end
     if not ((version == "1" and V1_KINDS[kind]) or (version == "2" and (V2_KINDS[kind] or lib.kinds[kind]))) then return end
+    -- an older copy: its player gets the records it lacks in the old form too
+    if lib.SyncOldPeer then lib.SyncOldPeer(sender, channel) end
     local hash = senderHash(sender)
     local stats = lib.stats
     if not stats.senders[hash] then
@@ -2721,11 +2932,32 @@ accept = function(text, channel, sender)
 end
 
 -----------------------------------------------------------------------------
--- Messages: sending (one message every few seconds, own records only)
+-- Messages: sending. This character's own records are numbered in the order
+-- they were found (its log, named by a random ID), so a player who has them
+-- up to some number gets only the ones after it:
+--   3H|log,last,version|addons  hello: "my records go up to <last>", with the
+--                               sharing version and the EzWoW addons loaded
+--                               ("MF2.0.30,QU1.0.21"); channel, guild and
+--                               party, soon after login, then every 15 minutes
+--   3R|log,have                 ask the log's owner for the records after
+--                               <have> (a whisper; the channel when whispers
+--                               can't reach that player)
+--   3Y|log,from,to|records      the records numbered <from>..<to>, in order:
+--                               "1E<body>;2L<body>;..." (numbers of records
+--                               that changed or went are left out). The answer
+--                               to an ask, or the records found now (channel,
+--                               guild, party: everyone at once)
+-- Numbers are in base 36. A player keeps how far it has each log: a message
+-- moves that on only when it follows on (from <= have + 1) and none of its
+-- records went over the receive limit. Every 7 to 14 days a log is taken from
+-- the start again: votes of different players for the same fact meet again,
+-- and records lost here come back.
+-- Copies up to version 12 send their records again and again and don't know
+-- these messages. Their records are taken as before, and while such players
+-- are around, the records they did not have yet go out in the old form too
+-- (one sweep for all of them, on the ways they were heard on), ending in
+-- ";~13" so that newer copies pass them by.
 -----------------------------------------------------------------------------
-local sentAt = {}        -- record key -> time sent to the party, raid and guild (this session)
-local groupTurn = { turn = 0 }
-local channelOut = { sent = {}, turn = 0 }   -- the same for the data channel
 local channelReady = false
 local BASE_ORDER = { "E", "S", "V", "I", "O", "D", "R", "L", "G" }
 
@@ -2747,178 +2979,782 @@ local function targets()
     return list
 end
 
--- the records there when the first message of the session was put together;
--- the ones found after that are "fresh" and go out before the older ones
-local sessionKeys
-
--- this character's records, ready to send: { kind, version, key, body, fresh }
+-- this character's records: { kind, version, key, body }; the key stays the
+-- same while the record does (a sighting: its creature and when it was seen)
 local function collect()
     local loc = locale()
     local out = {}
-    local first = sessionKeys == nil
-    if first then sessionKeys = {} end
     for _, rec in ipairs(ownRecords()) do
         local kind, body, version = rec[1], rec[2], rec[3]
         if kind == "D" or kind == "O" or (lib.kinds[kind] and lib.kinds[kind].localized) then body = loc .. "," .. body end
-        -- a sighting is sent again as soon as it changes
         local key = kind .. ";" .. (kind == "R" and (body:match("^(%d+),") .. ":" .. tostring(rec[4])) or body)
-        if first then sessionKeys[key] = true end
-        out[#out + 1] = { kind = kind, version = version, key = key, body = body, fresh = not sessionKeys[key] }
+        out[#out + 1] = { kind = kind, version = version, key = key, body = body }
     end
     return out
 end
 
--- one message of the records not sent yet (sent: record key -> time; a
--- record goes again after resendAfter seconds, never when that is nil).
--- Returns the message, its record keys (see unsend) and how many were fresh.
-local function pack(records, sent, resendAfter, state)
-    local t = now()
-    local byKind = {}
-    local anyFresh = false
-    for _, rec in ipairs(records) do
-        local last = sent[rec.key]
-        if not last or (resendAfter and t - last > resendAfter) then
-            local list = byKind[rec.kind]
-            if not list then
-                list = { version = rec.version, fresh = {}, rest = {} }
-                byKind[rec.kind] = list
-            end
-            if rec.fresh and not last then
-                list.fresh[#list.fresh + 1] = rec
-                anyFresh = true
-            else
-                list.rest[#list.rest + 1] = rec
-            end
-        end
-    end
-    -- kinds take turns, so many drops do not hold back the rest; records found
-    -- this session go first (a kind holding some is picked before the others)
-    local order = kindOrder()
-    for pass = anyFresh and 1 or 2, 2 do
-        for i = 1, #order do
-            local kind = order[(state.turn + i - 1) % #order + 1]
-            local list = byKind[kind]
-            if list and (pass == 2 or #list.fresh > 0) then
-                state.turn = (state.turn + i) % #order
-                local head = list.version .. kind .. "|"
-                local parts, keys, size, nFresh = {}, {}, #head, 0
-                for _, group in ipairs({ list.fresh, list.rest }) do
-                    for _, rec in ipairs(group) do
-                        if size + #rec.body + 1 > MAX_MSG then break end
-                        parts[#parts + 1] = rec.body
-                        keys[#keys + 1] = { rec.key, sent[rec.key] }
-                        size = size + #rec.body + 1
-                        sent[rec.key] = t
-                        if group == list.fresh then nFresh = nFresh + 1 end
-                    end
-                end
-                if #parts > 0 then return head .. concat(parts, ";"), keys, nFresh end
-            end
-        end
-    end
-    return nil
-end
+local whisperedCount = 0  -- players sent records by whisper this session
+local recentWhisper = {}  -- whisper target -> time (to hide "no such player" notices)
 
--- a message that could not be sent: its records count as not sent
-local function unsend(sent, keys)
-    for _, k in ipairs(keys or {}) do sent[k[1]] = k[2] end
-end
-
--- Whispers: one player of the channel list per tick, in turn. Each player
--- gets a record once this session (it is saved on their side).
-local whisperTurn = 0
-local whispered = {}     -- list key -> { sent = { record key -> time }, turn = n, any = true|nil }
-local whisperedCount = 0
-local recentWhisper = {} -- whisper target -> time (to hide "no such player" notices)
-
-local function nextWhisper(records)
-    local list = roster.list
-    local n = #list
-    for _ = 1, n do
-        whisperTurn = whisperTurn % n + 1
-        local m = list[whisperTurn]
-        local w = whispered[m.key]
-        if not w then
-            w = { sent = {}, turn = 0 }
-            whispered[m.key] = w
-        end
-        local msg, keys, nFresh = pack(records, w.sent, nil, w)
-        if msg then return m, msg, w, keys, nFresh end
-    end
-    return nil
-end
-
--- fresh: how many of the records were found this session (for the activity log)
-local function sendOne(msg, way, target, fresh)
+-- quiet: not put in the activity log (hellos, asks)
+local function sendOne(msg, way, target, fresh, quiet)
     local ok, result = pcall(C_ChatInfo.SendAddonMessage, PREFIX, msg, way, target)
     lib.stats.results = lib.stats.results or {}
     lib.stats.results[way] = ok and tostring(result) or "error"
     -- result: nil/true/0 when sent, otherwise a send-result code (throttled...)
     local sent = ok and (result == nil or result == true or result == 0)
     local why = not sent and (ok and tostring(result) or ("error " .. tostring(result))) or nil
-    if activity.sent then pcall(activity.sent, way, way == "WHISPER" and target or nil, msg, sent, why, fresh) end
+    if not quiet and activity.sent then pcall(activity.sent, way, way == "WHISPER" and target or nil, msg, sent, why, fresh) end
     if sent then return true end
     return false, why
 end
 
-local function sendTick()
-    if not lib.IsEnabled() then return "off" end
-    if InCombatLockdown and InCombatLockdown() then return "combat" end
-    if not (C_ChatInfo and C_ChatInfo.SendAddonMessage) then return "no api" end
-    local useChannel = channelReady and lib.UsesChannel()
-    if useChannel and clock() - (roster.asked or 0) >= ROSTER_EVERY then requestRoster() end
-    local list = targets()
-    local whisperOn = useChannel and #roster.list > 0
-    local chan = useChannel and channelNumber() or nil
-    if #list == 0 and not whisperOn and not chan then return "no target" end
-    local records = collect()
-    local notes = {}
-    if #list > 0 then
-        local msg, keys, nFresh = pack(records, sentAt, RESEND_AFTER, groupTurn)
-        if msg then
-            local okAny, last = false, nil
-            for _, target in ipairs(list) do
-                local ok, why = sendOne(msg, target[1], nil, nFresh)
-                if ok then okAny = true else last = why end
+local sync = {}
+local sendTick
+do
+    local V = "3"
+    local HELLO_FIRST, HELLO_EVERY = 30, 15 * 60
+    -- answers: by whisper 4 s apart for one player; when three or more players
+    -- (or one whispers can't reach) wait, on the channel 4 s apart for all of
+    -- them at once; at most SERVE_MAX players, SESSION_MAX messages a session
+    local SERVE_GAP, SERVE_CHANNEL_GAP, SERVE_MAX, SHARED_FROM, SESSION_MAX = 4, 4, 30, 3, 4000
+    local ASK_MAX, ASK_STALL, ASK_TRIES = 2, 90, 3
+    local NUMBER_MAX = 10000000     -- larger numbers in a message: not taken
+    -- logs kept (the one heard from longest ago makes room) and logs waiting to be
+    -- asked: bounded, so made-up hellos can't fill the saved data
+    local PEERS_MAX, QUEUE_MAX = 600, 50
+    local REFRESH_MIN, REFRESH_SPAN = 7 * 86400, 7 * 86400
+    local PEER_KEEP, OLD_KEEP, OLD_AROUND, CHECK_EVERY = 90 * 86400, 30 * 86400, 30 * 60, 30
+    -- an older copy can't tell what it missed (a loading screen, a lost message):
+    -- it gets everything again once this long after the last whole sweep
+    local OLD_AGAIN = 3 * 3600
+    local MARK = ";~" .. LIB_VERSION
+
+    -- addon folder (without "EzWoW-") -> its two letters in the hello
+    local CODES = {
+        Bags = "BA", BestGearFinder = "BG", ChatTranslator = "CT", DruidForms = "DF", DungeonRouteGuide = "DR",
+        ErrorCatcher = "EC", FlightMap = "FL", FontChanger = "FC", FrameMover = "FM", GroupFinder = "GF",
+        MapFinder = "MF", ProfessionRecipes = "PR", Quest = "QU", SmartFishing = "SF", SpellControl = "SC",
+        Tooltip = "TT", UnitFrames = "UF", UtilityBar = "UB",
+    }
+    sync.CODES = CODES
+
+    -- this session: online[base name] = { name, at, group = heard by party, raid or
+    -- guild, newer = a hello came }; asking[log] = { progress, tries, way };
+    -- queue[log] = { at, tries }; serve[sender] = { name, key, from, next, channel,
+    -- fails, sent }; olds[base name] = { at, way } (older copies heard lately);
+    -- sweep = the old-form round; served = answer messages sent this session
+    local S = { online = {}, asking = {}, queue = {}, gaveUp = {}, serve = {}, olds = {}, checkAt = 0, served = 0 }
+    -- recs[number] = record, order = the numbers in order, seqOf[record key] = number
+    local L = { seqOf = {}, recs = {}, order = {}, count = 0 }
+    sync.S, sync.L = S, L
+
+    local function rand(a, b)
+        if math.random then return math.random(a, b) end
+        return a
+    end
+
+    -- the saved part (with the shared data): id = log ID, last = its last number,
+    -- seq[record hash] = number, peers[log ID] = { h = have, l = their last,
+    -- n = name, t = heard, r = take from the start again at }, old[base name] =
+    -- { s = sent in the old form up to, t = heard, n = name }
+    local function D()
+        local d = lib.Data()
+        local s = d.sync
+        if type(s) ~= "table" then
+            s = {}
+            d.sync = s
+        end
+        if type(s.seq) ~= "table" then s.seq = {} end
+        if type(s.peers) ~= "table" then s.peers = {} end
+        if type(s.old) ~= "table" then s.old = {} end
+        if type(s.id) ~= "string" or not s.id:match("^%w+$") or #s.id < 6 or #s.id > 12 then
+            local a, b = b36(rand(0, 1679615)), b36(rand(0, 1679615))
+            s.id = string.rep("0", 4 - #a) .. a .. string.rep("0", 4 - #b) .. b
+            s.last, s.seq = 0, {}
+        end
+        s.last = tonumber(s.last) or 0
+        return s
+    end
+    sync.D = D
+
+    -- a record key as saved: two 31-bit hashes
+    local function hashOf(key)
+        local a, b = 5381, 52711
+        for i = 1, #key do
+            local c = key:byte(i)
+            a = (a * 33 + c) % 2147483647
+            b = (b * 131 + c) % 2147483629
+        end
+        return b36(a) .. "." .. b36(b)
+    end
+
+    -- this character's records with their numbers; a new record takes the next one
+    function sync.number()
+        local s = D()
+        local list = collect()
+        local recs, first, grew = {}, not L.numbered, false
+        local hashes = first and {} or nil
+        for _, rec in ipairs(list) do
+            local n = L.seqOf[rec.key]
+            if not n then
+                local h = hashOf(rec.key)
+                n = tonumber(s.seq[h])
+                if not n then
+                    s.last = s.last + 1
+                    n = s.last
+                    s.seq[h] = n
+                end
+                L.seqOf[rec.key] = n
+                grew = true
+                if hashes then hashes[h] = true end
             end
-            notes[#notes + 1] = okAny and "group sent" or ("group " .. tostring(last))
-            if okAny then lib.stats.sent = lib.stats.sent + 1 else unsend(sentAt, keys) end
-        else
-            notes[#notes + 1] = "group nothing new"
+            if not recs[n] then recs[n] = rec end
+        end
+        if first then
+            -- the numbers of records that are gone are let go
+            for h in pairs(s.seq) do
+                if not hashes[h] then s.seq[h] = nil end
+            end
+            L.numbered = true
+            -- records numbered from now on go to everyone at once
+            L.fresh = s.last + 1
+        end
+        local count = 0
+        for _ in pairs(recs) do count = count + 1 end
+        if grew or count ~= L.count then
+            local order = {}
+            for n in pairs(recs) do order[#order + 1] = n end
+            table.sort(order)
+            L.order = order
+        end
+        L.recs, L.count = recs, count
+    end
+
+    -- the place in the order of the first number >= from
+    local function firstIndex(from)
+        local order = L.order
+        local lo, hi = 1, #order + 1
+        while lo < hi do
+            local mid = floor((lo + hi) / 2)
+            if order[mid] < from then lo = mid + 1 else hi = mid end
+        end
+        return lo
+    end
+
+    -- one message of the records numbered from <from> on: message, last number
+    -- in it, records in it, the records as text; nil when nothing is left
+    local function pack(from)
+        local s = D()
+        if from > s.last then return nil end
+        local head = V .. "Y|" .. s.id .. "," .. b36(from) .. ","
+        local room = MAX_MSG - #head - 8
+        local parts, size, to = {}, 0, from - 1
+        local order, i = L.order, firstIndex(from)
+        while i <= #order do
+            local rec = L.recs[order[i]]
+            local piece = rec.version .. rec.kind .. rec.body
+            local add = #piece + (#parts > 0 and 1 or 0)
+            if size + add > room then
+                if #parts > 0 then break end
+                -- longer than any message can carry: passed over
+            else
+                parts[#parts + 1] = piece
+                size = size + add
+            end
+            to = order[i]
+            i = i + 1
+        end
+        -- nothing after these: the numbers up to the last one are done
+        if i > #order then to = s.last end
+        local text = concat(parts, ";")
+        return head .. b36(to) .. "|" .. text, to, #parts, text
+    end
+    sync.pack = pack
+
+    -- the EzWoW addons loaded, with their versions
+    local function addonList()
+        local get = (C_AddOns and C_AddOns.GetAddOnMetadata) or _G.GetAddOnMetadata
+        local parts = {}
+        if type(get) ~= "function" then return "" end
+        for name in pairs(lib.hosts) do
+            local code = CODES[(tostring(name):gsub("^EzWoW%-", ""))]
+            if code then
+                local ok, v = pcall(get, name, "Version")
+                if ok and type(v) == "string" and not isSecret(v) and v:match("^[%w%.%-]+$") and #v <= 12 then
+                    parts[#parts + 1] = code .. v
+                end
+            end
+        end
+        table.sort(parts)
+        return concat(parts, ",")
+    end
+
+    local function helloText()
+        local s = D()
+        local text = V .. "H|" .. s.id .. "," .. b36(s.last) .. "," .. LIB_VERSION .. "|" .. addonList()
+        while #text > 250 and text:find(",[^,|]*$") do text = text:gsub(",[^,|]*$", "") end
+        return text
+    end
+
+    -- a player heard from this session
+    local function seen(sender, way, newer)
+        local key = baseName(sender)
+        if not key then return nil end
+        local o = S.online[key]
+        if not o then
+            o = {}
+            S.online[key] = o
+        end
+        o.name, o.at = sender, clock()
+        if GROUP_CHANNELS[way] then o.group = true end
+        if newer then
+            o.newer = true
+            S.olds[key] = nil
+        end
+        return key, o
+    end
+
+    local function refreshAt() return now() + REFRESH_MIN + rand(0, REFRESH_SPAN) end
+
+    local function peer(id, sender)
+        local s = D()
+        local p = s.peers[id]
+        if type(p) ~= "table" then
+            local n, oldId, oldAt = 0, nil, nil
+            for k, v in pairs(s.peers) do
+                n = n + 1
+                local at = type(v) == "table" and tonumber(v.t) or 0
+                if not oldAt or at < oldAt then oldId, oldAt = k, at end
+            end
+            if n >= PEERS_MAX and oldId then s.peers[oldId] = nil end
+            p = { h = 0, l = 0, r = refreshAt() }
+            s.peers[id] = p
+        end
+        p.h, p.l = tonumber(p.h) or 0, tonumber(p.l) or 0
+        if type(sender) == "string" then p.n = sender end
+        p.t = now()
+        return p
+    end
+
+    -- that log has more than this character took: ask its owner soon (spread out)
+    local function want(id)
+        local p = D().peers[id]
+        if type(p) ~= "table" or (tonumber(p.h) or 0) >= (tonumber(p.l) or 0) then return end
+        if S.asking[id] or S.queue[id] or S.gaveUp[id] then return end
+        local n = 0
+        for _ in pairs(S.queue) do n = n + 1 end
+        if n >= QUEUE_MAX then return end   -- (asked for later: the check comes every half minute)
+        S.queue[id] = { at = clock() + rand(2, 15), tries = 0 }
+    end
+
+    ---------------------------------------------------------------- receiving
+    function sync.hello(text, way, sender)
+        local id, last, ver, addons = text:match("^3H|(%w+),(%w+),(%d+)|?([%w%.%-,]*)$")
+        last = id and tonumber(last, 36)
+        if not last or last > NUMBER_MAX or #id < 6 or #id > 12 or id == D().id then return end
+        seen(sender, way, true)
+        if activity.version then pcall(activity.version, sender, ver, addons) end
+        local p = peer(id, sender)
+        -- (a smaller number than before: the owner's data went back; take the rest again)
+        if last < p.h then p.h = last end
+        p.l = last
+        lib.stats.hellos = (lib.stats.hellos or 0) + 1
+        want(id)
+    end
+
+    -- someone asks for this character's records (only the log's owner answers)
+    function sync.ask(text, way, sender)
+        local id, have = text:match("^3R|(%w+),(%w+)$")
+        have = id and tonumber(have, 36)
+        local s = D()
+        if not have or id ~= s.id or have < 0 or have >= s.last then return end
+        local key = baseName(sender)
+        if not key then return end
+        -- by the channel only from players whispers can't reach (another faction or
+        -- server): anyone else asks by whisper
+        local far = roster.left[key] == "faction" or roster.left[key] == "server"
+        if way == "CHANNEL" and not far then return end
+        local q = S.serve[sender]
+        if not q then
+            local n = 0
+            for _ in pairs(S.serve) do n = n + 1 end
+            if n >= SERVE_MAX then return end
+            q = { next = 0, sent = 0 }
+            S.serve[sender] = q
+        end
+        q.name, q.key, q.from, q.channel, q.fails = sender, key, have + 1, way == "CHANNEL", 0
+        lib.stats.askedBy = (lib.stats.askedBy or 0) + 1
+    end
+
+    -- numbered records: taken like any records, then the log moves on
+    function sync.data(text, way, sender)
+        local id, from, to, payload = text:match("^3Y|(%w+),(%w+),(%w+)|(.*)$")
+        from, to = id and tonumber(from, 36), id and tonumber(to, 36)
+        if not (from and to) or from < 1 or to < from - 1 or to > NUMBER_MAX or #id < 6 or #id > 12
+            or id == D().id then return end
+        -- by whisper only as the answer to an ask
+        if way == "WHISPER" and not (S.asking[id] or S.queue[id]) then return end
+        local key = seen(sender, way, true)
+        local p = peer(id, sender)
+        if to > p.l then p.l = to end
+        -- the owner is answering (on the channel maybe for others first): no new ask
+        local a = S.asking[id]
+        if a then a.progress = clock() end
+        if to <= p.h then
+            if p.h >= p.l then S.asking[id], S.queue[id] = nil, nil end
+            return
+        end
+        local hash = senderHash(sender)
+        local stats = lib.stats
+        if not stats.senders[hash] then
+            stats.senders[hash] = true
+            stats.players = stats.players + 1
+        end
+        local w = (stats.via or {})[way] or { players = 0, seen = {} }
+        stats.via = stats.via or {}
+        stats.via[way] = w
+        if not w.seen[hash] then w.seen[hash] = true; w.players = w.players + 1 end
+        -- a party, raid or guild member (heard there this session): one player is
+        -- enough, whichever way the records come
+        local o = key and S.online[key]
+        local needed = (GROUP_CHANNELS[way] or (o and o.group)) and CONFIRM_GROUP or CONFIRM_PUBLIC
+        local loc = locale()
+        local groups, kinds = {}, {}
+        local limited = false
+        for piece in payload:gmatch("[^;]+") do
+            local v, kind, body = piece:match("^(%d)(%u)(.+)$")
+            if kind and ((v == "1" and V1_KINDS[kind]) or (v == "2" and (V2_KINDS[kind] or lib.kinds[kind]))) then
+                local g = groups[kind]
+                if not g then
+                    g = { n = 0, taken = 0, new = 0, wait = 0, lang = 0, bodies = {} }
+                    groups[kind] = g
+                    kinds[#kinds + 1] = kind
+                end
+                g.n = g.n + 1
+                g.bodies[#g.bodies + 1] = body
+                if not limited and not allow(hash, 1) then limited = true end
+                if not limited then
+                    g.taken = g.taken + 1
+                    stats.received = stats.received + 1
+                    local before, pendBefore = activity.seq, activity.pend
+                    if kind == "D" or kind == "O" or (lib.kinds[kind] and lib.kinds[kind].localized) then
+                        local l, rest = body:match("^(%a%a%u%u),(.+)$")
+                        if l == loc then receive(kind, rest, hash, needed) else g.lang = g.lang + 1 end
+                    else
+                        receive(kind, body, hash, needed)
+                    end
+                    if activity.seq > before then
+                        g.new = g.new + 1
+                        g.newBodies = g.newBodies or {}
+                        g.newBodies[#g.newBodies + 1] = body
+                    elseif activity.pend > pendBefore then
+                        g.wait = g.wait + 1
+                    end
+                end
+            end
+        end
+        if activity.received then
+            for _, kind in ipairs(kinds) do
+                local g = groups[kind]
+                pcall(activity.received, sender, way, kind, g, concat(g.bodies, ";"), g.newBodies)
+            end
+        end
+        -- the log moves on only when this follows on and nothing was cut
+        if not limited and from <= p.h + 1 then p.h = to end
+        if p.h >= p.l then S.asking[id], S.queue[id] = nil, nil end
+        flushChanged()
+    end
+
+    function lib.SyncMessage(text, way, sender)
+        if not lib.IsEnabled() or type(text) ~= "string" then return end
+        local t = text:sub(1, 2)
+        if t == "3H" then
+            if way ~= "WHISPER" then sync.hello(text, way, sender) end
+        elseif t == "3R" then
+            sync.ask(text, way, sender)
+        elseif t == "3Y" then
+            sync.data(text, way, sender)
         end
     end
-    -- the data channel: one message reaches everyone in it (sent again after
-    -- a while for the players who joined since)
-    if chan then
-        local msg, keys, nFresh = pack(records, channelOut.sent, RESEND_AFTER, channelOut)
-        if msg then
-            local ok, why = sendOne(msg, "CHANNEL", chan, nFresh)
-            notes[#notes + 1] = ok and "channel sent" or ("channel " .. tostring(why))
-            if ok then lib.stats.sent = lib.stats.sent + 1 else unsend(channelOut.sent, keys) end
-        else
-            notes[#notes + 1] = "channel nothing new"
+
+    -- an older copy's records came: its player is around (and gets the records
+    -- it lacks in the old form)
+    function lib.SyncOldPeer(sender, way)
+        local key, o = seen(sender, way)
+        if not key or o.newer then return end
+        S.olds[key] = { at = clock(), way = (way == "WHISPER" or not way) and "CHANNEL" or way }
+        local s = D()
+        local r = s.old[key]
+        if type(r) ~= "table" then
+            r = { s = 0 }
+            s.old[key] = r
+        end
+        r.t, r.n = now(), sender
+        if activity.version then pcall(activity.version, sender, "12", nil, true) end
+    end
+
+    -- the old form from a newer copy: that player has the numbered records
+    function lib.SyncNewerPeer(sender, way)
+        seen(sender, way, true)
+    end
+
+    -- a whisper found no such player: no more answers or asks to them for now
+    function lib.SyncNotFound(name)
+        local key = baseName(name)
+        if not key then return end
+        for sender, q in pairs(S.serve) do
+            if q.key == key then S.serve[sender] = nil end
+        end
+        S.online[key] = nil
+        local peers = D().peers
+        for id in pairs(S.asking) do
+            local p = peers[id]
+            if type(p) == "table" and baseName(p.n) == key then S.asking[id] = nil end
         end
     end
-    if whisperOn then
-        local m, msg, w, keys, nFresh = nextWhisper(records)
-        if m then
-            recentWhisper[m.name] = clock()
-            local ok, why = sendOne(msg, "WHISPER", m.name, nFresh)
-            notes[#notes + 1] = ok and "whisper sent" or ("whisper " .. tostring(why))
-            if ok then
-                lib.stats.sent = lib.stats.sent + 1
-                if not w.any then
-                    w.any = true
-                    whisperedCount = whisperedCount + 1
+
+    -- the data channel is ready / a group joined: say hello there soon
+    function lib.SyncChannelReady() S.helloAt = clock() + 5 end
+    function lib.SyncGroupJoined() S.groupHelloAt = clock() + 5 end
+
+    ---------------------------------------------------------------- asking
+    -- how to reach a log's owner: "WHISPER", "CHANNEL" (whispers can't reach
+    -- them: another faction or server) or nil (not around now)
+    local function reach(p)
+        local key = baseName(p.n)
+        if not key or (unreachable[key] or 0) > clock() then return nil end
+        local why = roster.left[key]
+        if why == "faction" or why == "server" then return channelNumber() and "CHANNEL" or nil end
+        if roster.byKey[key] or S.online[key] or roster.inChannel[key] then return "WHISPER" end
+        return nil
+    end
+
+    -- every half minute: logs taken from the start again, saved logs whose owner
+    -- is around now, entries not heard from for long let go
+    function sync.check()
+        local t = clock()
+        if t < S.checkAt then return end
+        S.checkAt = t + CHECK_EVERY
+        local s, n = D(), now()
+        for id, p in pairs(s.peers) do
+            if type(p) ~= "table" or n - (tonumber(p.t) or 0) > PEER_KEEP then
+                s.peers[id] = nil
+            else
+                if tonumber(p.r) and n > p.r then
+                    p.h, p.r = 0, refreshAt()
+                end
+                local key = baseName(p.n)
+                if key and (S.online[key] or roster.inChannel[key]) then want(id) end
+            end
+        end
+        for key, o in pairs(s.old) do
+            if type(o) ~= "table" or n - (tonumber(o.t) or 0) > OLD_KEEP then s.old[key] = nil end
+        end
+    end
+
+    local function askTick(t)
+        local peers = D().peers
+        local active = 0
+        -- (numbers read through tonumber: saved data may come from anywhere)
+        local function done(p)
+            return type(p) ~= "table" or (tonumber(p.h) or 0) >= (tonumber(p.l) or 0)
+        end
+        for id, a in pairs(S.asking) do
+            local p = peers[id]
+            if done(p) then
+                S.asking[id] = nil
+            elseif t - a.progress > ASK_STALL then
+                -- no answer for a while: asked again a few times, then left for this session
+                S.asking[id] = nil
+                if a.tries + 1 >= ASK_TRIES then
+                    S.gaveUp[id] = true
+                else
+                    S.queue[id] = { at = t + 5, tries = a.tries + 1 }
                 end
             else
-                unsend(w.sent, keys)
+                active = active + 1
             end
+        end
+        if active >= ASK_MAX then return end
+        local best, bestAt
+        for id, q in pairs(S.queue) do
+            if q.at <= t and (not bestAt or q.at < bestAt) then best, bestAt = id, q.at end
+        end
+        if not best then return end
+        local q = S.queue[best]
+        S.queue[best] = nil
+        local p = peers[best]
+        if done(p) or type(p.n) ~= "string" then return end
+        local how = reach(p)
+        local target
+        if how == "CHANNEL" then target = channelNumber() elseif how then target = p.n end
+        if not target then return end
+        if how == "WHISPER" then recentWhisper[p.n] = t end
+        if sendOne(V .. "R|" .. best .. "," .. b36(tonumber(p.h) or 0), how, target, nil, true) then
+            S.asking[best] = { progress = t, tries = q.tries, way = how }
+            lib.stats.asks = (lib.stats.asks or 0) + 1
         else
-            notes[#notes + 1] = "whisper nothing new"
+            S.queue[best] = { at = t + 30, tries = q.tries + 1 }
         end
     end
-    return concat(notes, ", ")
+
+    ---------------------------------------------------------------- answering
+    -- One answer every 2 seconds at most. Three or more players of the data
+    -- channel waiting (or one whispers can't reach): one message on the channel
+    -- serves them all, from the lowest number any of them needs (whoever has that
+    -- part already passes it by on its header). The others (fewer, or not in the
+    -- channel: guild members with the channel turned off): whispered in turn.
+    local function serveTick(t)
+        local s = D()
+        if S.served >= SESSION_MAX then return end
+        local chan = channelReady and lib.UsesChannel() and channelNumber()
+        local onChannel, far, low = 0, false, nil
+        for sender, q in pairs(S.serve) do
+            if q.from > s.last or (q.channel and not chan) then
+                S.serve[sender] = nil
+            else
+                q.onChan = chan and (q.channel or roster.inChannel[q.key]) and true or false
+                if q.onChan then
+                    onChannel = onChannel + 1
+                    if q.channel then far = true end
+                    if not low or q.from < low then low = q.from end
+                end
+            end
+        end
+        local shared = chan and (far or onChannel >= SHARED_FROM)
+        if shared and t >= (S.chanNext or 0) then
+            local msg, to, _, text = pack(low)
+            if msg then
+                local ok, why = sendOne(msg, "CHANNEL", chan, nil, true)
+                if activity.sent and text ~= "" then pcall(activity.sent, "CHANNEL", nil, V .. "Y|" .. text, ok, why, 0) end
+                if ok then
+                    S.served = S.served + 1
+                    lib.stats.sent = lib.stats.sent + 1
+                    for _, q in pairs(S.serve) do
+                        if q.onChan and q.from >= low and q.from <= to + 1 then q.from = to + 1 end
+                    end
+                    S.chanNext = t + SERVE_CHANNEL_GAP
+                else
+                    S.chanNext = t + 10
+                end
+                return
+            end
+        end
+        local pick, pickKey
+        for sender, q in pairs(S.serve) do
+            if not q.channel and not (shared and q.onChan) and q.next <= t and (not pick or q.next < pick.next) then
+                pick, pickKey = q, sender
+            end
+        end
+        if not pick then return end
+        -- one player is not sent more than three times this character's whole log
+        -- a session (a client asking again and again over a lost message)
+        if pick.sent >= 3 * (floor(L.count / 10) + 1) + 50 then
+            S.serve[pickKey] = nil
+            return
+        end
+        local msg, to, _, text = pack(pick.from)
+        if not msg then
+            S.serve[pickKey] = nil
+            return
+        end
+        recentWhisper[pick.name] = t
+        local ok, why = sendOne(msg, "WHISPER", pick.name, nil, true)
+        if activity.sent and text ~= "" then
+            pcall(activity.sent, "WHISPER", pick.name, V .. "Y|" .. text, ok, why, 0)
+        end
+        if ok then
+            S.served = S.served + 1
+            lib.stats.sent = lib.stats.sent + 1
+            pick.sent = pick.sent + 1
+            pick.from = to + 1
+            pick.next = t + SERVE_GAP
+            if not pick.counted then
+                pick.counted = true
+                whisperedCount = whisperedCount + 1
+            end
+            if pick.from > s.last then S.serve[pickKey] = nil end
+        else
+            pick.fails = (pick.fails or 0) + 1
+            pick.next = t + 10
+            if pick.fails >= 3 then S.serve[pickKey] = nil end
+        end
+    end
+
+    -- every 2 seconds: one ask and one answer at most
+    function lib.ServeTick()
+        if not lib.IsEnabled() or not L.numbered then return end
+        if InCombatLockdown and InCombatLockdown() then return end
+        if not (C_ChatInfo and C_ChatInfo.SendAddonMessage) then return end
+        local t = clock()
+        askTick(t)
+        serveTick(t)
+    end
+
+    ---------------------------------------------------------------- older copies
+    -- the next old-form message of the sweep: kind by kind, the records numbered
+    -- after <from> up to <upto>
+    local function sweepMessage(sw)
+        while sw.ki <= #sw.kinds do
+            local kind = sw.kinds[sw.ki]
+            local order, i = L.order, firstIndex(sw.pos + 1)
+            local parts, size, head, done = {}, 0, nil, true
+            -- records with names carry the client language: so does the mark, or an
+            -- older copy counts it as a record in another language
+            local localized = kind == "D" or kind == "O" or (lib.kinds[kind] and lib.kinds[kind].localized)
+            local mark = localized and (";" .. locale() .. "," .. MARK:sub(2)) or MARK
+            while i <= #order and order[i] <= sw.upto do
+                local rec = L.recs[order[i]]
+                if rec.kind == kind then
+                    head = head or (rec.version .. kind .. "|")
+                    if size + #rec.body + 1 > MAX_MSG - #head - #mark then
+                        done = false
+                        break
+                    end
+                    parts[#parts + 1] = rec.body
+                    size = size + #rec.body + 1
+                    sw.pos = order[i]
+                end
+                i = i + 1
+            end
+            if done then
+                sw.ki, sw.pos = sw.ki + 1, sw.from
+            end
+            if #parts > 0 then return head .. concat(parts, ";") .. mark, kind, concat(parts, ";") end
+        end
+        return nil
+    end
+
+    -- older copies heard from lately: the records none of them had yet, once
+    local function oldTick()
+        local s = D()
+        local t = clock()
+        local start, ways = nil, {}
+        for key, o in pairs(S.olds) do
+            if t - o.at > OLD_AROUND then
+                S.olds[key] = nil
+            else
+                local r = s.old[key]
+                local from = type(r) == "table" and tonumber(r.s) or 0
+                if type(r) == "table" and now() - (tonumber(r.at) or 0) > OLD_AGAIN then from = 0 end
+                if not start or from < start then start = from end
+                ways[o.way] = true
+            end
+        end
+        if not start then
+            S.sweep = nil
+            return nil
+        end
+        local sw = S.sweep
+        if not sw then
+            if start >= s.last then return nil end
+            sw = { from = start, upto = s.last, kinds = kindOrder(), ki = 1, pos = start, ways = ways, keys = {} }
+            for key in pairs(S.olds) do sw.keys[key] = true end
+            S.sweep = sw
+        end
+        local msg, kind, text = sweepMessage(sw)
+        if msg then return msg, sw.ways, kind, text end
+        -- done: everyone around then has these now
+        for key in pairs(sw.keys) do
+            local r = s.old[key]
+            if type(r) == "table" then
+                -- a whole sweep (from the start) starts the wait for the next one
+                if sw.from == 0 then r.s, r.at = sw.upto, now() else r.s = max(tonumber(r.s) or 0, sw.upto) end
+            end
+        end
+        S.sweep = nil
+        return nil
+    end
+
+    ---------------------------------------------------------------- every 8 seconds
+    -- where messages for everyone go: the data channel, the guild, the party or raid
+    local function waysNow(useChannel)
+        local list = {}
+        local chan = useChannel and channelNumber()
+        if chan then list[#list + 1] = { "CHANNEL", chan } end
+        for _, w in ipairs(targets()) do list[#list + 1] = { w[1] } end
+        return list
+    end
+
+    -- one kind of message a tick: the hello, then records found now, then the
+    -- sweep for older copies
+    sendTick = function()
+        if not lib.IsEnabled() then return "off" end
+        if InCombatLockdown and InCombatLockdown() then return "combat" end
+        if not (C_ChatInfo and C_ChatInfo.SendAddonMessage) then return "no api" end
+        local useChannel = channelReady and lib.UsesChannel()
+        if useChannel and clock() - (roster.asked or 0) >= ROSTER_EVERY then requestRoster() end
+        sync.number()
+        sync.check()
+        local t = clock()
+        S.helloAt = S.helloAt or (t + HELLO_FIRST)
+        local list = waysNow(useChannel)
+        if #list == 0 then return "no target" end
+        local all = t >= S.helloAt
+        if all or (S.groupHelloAt and t >= S.groupHelloAt) then
+            local msg = helloText()
+            for _, w in ipairs(list) do
+                if all or w[1] == "PARTY" or w[1] == "RAID" then sendOne(msg, w[1], w[2], nil, true) end
+            end
+            if all then S.helloAt = t + HELLO_EVERY end
+            S.groupHelloAt = nil
+            lib.stats.sentHellos = (lib.stats.sentHellos or 0) + 1
+            return "hello"
+        end
+        local msg, to, n, text = pack(L.fresh)
+        if msg then
+            L.fresh = to + 1
+            if n > 0 then
+                local okAny
+                for _, w in ipairs(list) do
+                    local ok, why = sendOne(msg, w[1], w[2], nil, true)
+                    if activity.sent then pcall(activity.sent, w[1], nil, V .. "Y|" .. text, ok, why, n) end
+                    if ok then okAny = true end
+                end
+                if okAny then lib.stats.sent = lib.stats.sent + 1 end
+                return okAny and "new sent" or "new failed"
+            end
+        end
+        local old, oldWays, kind, oldText = oldTick()
+        if old then
+            for _, w in ipairs(list) do
+                if oldWays[w[1]] then
+                    local ok, why = sendOne(old, w[1], w[2], nil, true)
+                    if activity.sent then pcall(activity.sent, w[1], nil, "2" .. kind .. "|" .. oldText, ok, why, 0) end
+                end
+            end
+            lib.stats.sent = lib.stats.sent + 1
+            return "old sent"
+        end
+        return "nothing new"
+    end
+
+    ---------------------------------------------------------------- status
+    function lib.SyncStatus(short)
+        local s = D()
+        local peers, done = 0, 0
+        for _, p in pairs(s.peers) do
+            if type(p) == "table" then
+                peers = peers + 1
+                if (tonumber(p.h) or 0) >= (tonumber(p.l) or 0) then done = done + 1 end
+            end
+        end
+        local asking, waiting, serving = 0, 0, 0
+        for _ in pairs(S.asking) do asking = asking + 1 end
+        for _ in pairs(S.queue) do waiting = waiting + 1 end
+        for _ in pairs(S.serve) do serving = serving + 1 end
+        if short then return format(T("syncShort"), asking, waiting, serving) end
+        return format(T("syncLine"), L.count or 0, s.last, peers, done, asking, waiting, serving)
+    end
+
+    -- a log's progress for a player (by base name): have, their last
+    function lib.SyncProgress(key)
+        for _, p in pairs(D().peers) do
+            if type(p) == "table" and baseName(p.n) == key then return tonumber(p.h) or 0, tonumber(p.l) or 0 end
+        end
+        return nil
+    end
 end
 
 -- "no such player" notices for a whisper sent a moment ago are not shown;
@@ -2950,6 +3786,7 @@ function lib.HideWhisperError(msg)
             names[#names + 1] = (m and m.unknown) and (name .. "(?)") or name
             if #names > 5 then table.remove(names, 1) end
             if activity.notFound then pcall(activity.notFound, name) end
+            if lib.SyncNotFound then pcall(lib.SyncNotFound, name) end
             if key then
                 local n = (unreachableCount[key] or 0) + 1
                 unreachableCount[key] = n
@@ -3057,6 +3894,7 @@ local function finishPlacing(ok)
         channelReady = true
         later(1, removeFromChatWindows)
         later(3, requestRoster)
+        if lib.SyncChannelReady then lib.SyncChannelReady() end
     else
         channelReady = false
         channelGaveUp = true
@@ -3114,6 +3952,7 @@ function lib.JoinChannel()
         channelReady = true
         later(1, removeFromChatWindows)
         later(3, requestRoster)
+        if lib.SyncChannelReady then lib.SyncChannelReady() end
         return
     end
     relocate()
@@ -3264,6 +4103,18 @@ function lib.Slash(msg)
         if (stats.notFound or 0) > 0 then
             say(format(T("notFound"), stats.notFound) .. " " .. concat(stats.notFoundNames or {}, ", "))
         end
+        if lib.SyncStatus then say(lib.SyncStatus()) end
+        -- the sharing versions of the players heard from this session
+        local byVer = {}
+        for _, p in pairs(activity.data().people) do
+            if type(p) == "table" and p.ver and (tonumber(p.verAt) or 0) >= lib.sessionStart then
+                byVer[p.ver] = (byVer[p.ver] or 0) + 1
+            end
+        end
+        parts = {}
+        for ver, n in pairs(byVer) do parts[#parts + 1] = (ver == "12" and T("verOld") or ("v" .. ver)) .. " " .. n end
+        table.sort(parts)
+        say(format(T("versions"), #parts > 0 and concat(parts, ", ") or "-"))
     elseif msg == "roster" then
         requestRoster()
         say(rosterLine())
@@ -3299,7 +4150,7 @@ local function setupWindow()
     local BTN, BTN_ON = { 0.114, 0.157, 0.192, 1 }, { 0.12, 0.30, 0.37, 1 }
     local BORDER, BORDER_ON = { 0.204, 0.298, 0.357, 1 }, { 0.29, 0.78, 0.91, 1 }
     local MUTED, BODY = { 0.65, 0.72, 0.77 }, { 0.93, 0.96, 0.97 }
-    local KIND_ORDER = { "S", "E", "Q", "V", "I", "D", "O", "L", "M", "P", "Z", "N", "X", "R", "G", "F", "T", "B", "W", "U", "J" }
+    local KIND_ORDER = { "S", "E", "Q", "V", "I", "D", "O", "L", "M", "P", "Z", "N", "X", "R", "G", "F", "T", "B", "W", "U", "J", "Y" }
     local TABS = { "recv", "people", "sent", "kinds" }
     local TAB_TITLES = { recv = "tabRecv", people = "tabPeople", sent = "tabSent", kinds = "tabKinds" }
     local WAYS = { CHANNEL = "wayChannel", WHISPER = "wayWhisper", GUILD = "wayGuild", PARTY = "wayParty",
@@ -3315,7 +4166,7 @@ local function setupWindow()
             { t = "colKnown", w = 60, right = true }, { t = "colNote" } },
         news = { { t = "colTime", w = 64 }, { t = "colFrom", w = 140 }, { t = "colWay", w = 50 },
             { t = "colKind", w = 124 }, { t = "colNew", w = 52, right = true }, { t = "colContent" } },
-        people = { { t = "colName", w = 140 }, { t = "colWays", w = 100 }, { t = "colMsgs", w = 54, right = true },
+        people = { { t = "colName", w = 140 }, { t = "colVersion", w = 56 }, { t = "colWays", w = 100 }, { t = "colMsgs", w = 54, right = true },
             { t = "colRecords", w = 54, right = true }, { t = "colNew", w = 52, right = true },
             { t = "colWhispered", w = 70, right = true }, { t = "colLast", w = 52, right = true }, { t = "colState" } },
         sent = { { t = "colTime", w = 64 }, { t = "colTo", w = 220 }, { t = "colKind", w = 130 },
@@ -3469,6 +4320,12 @@ local function setupWindow()
 
     -- one record of a message as text (the message formats are above)
     local function describe(kind, body)
+        -- a numbered record: "1E<body>"
+        if kind == "Y" then
+            local k, rest = body:match("^%d(%u)(.+)$")
+            if k then return describe(k, rest) end
+            return body
+        end
         -- a kind another addon registered may describe its own records
         local spec = lib.kinds[kind]
         if spec and type(spec.describe) == "function" then
@@ -3609,6 +4466,23 @@ local function setupWindow()
     end
     function tips.people(tip, p)
         tip:AddLine(tostring(p.name or "?"), ACCENT[1], ACCENT[2], ACCENT[3])
+        if p.ver then
+            tip:AddLine(format(T("tipVersion"), p.ver == "12" and T("verOld") or ("v" .. tostring(p.ver))), BODY[1], BODY[2], BODY[3])
+        end
+        if type(p.addons) == "string" and p.addons ~= "" then
+            -- "MF2.0.30" -> "MapFinder 2.0.30"
+            local names = {}
+            for code, folder in pairs(sync.CODES or {}) do names[folder] = code end
+            local list = {}
+            for part in p.addons:gmatch("[^,]+") do
+                local code, v = part:match("^(%u%u)(.+)$")
+                list[#list + 1] = code and ((names[code] or code) .. " " .. v) or part
+            end
+            tip:AddLine(format(T("tipAddons"), concat(list, ", ")), MUTED[1], MUTED[2], MUTED[3], true)
+        end
+        local have, last = nil, nil
+        if lib.SyncProgress then have, last = lib.SyncProgress(baseName(p.name)) end
+        if have then tip:AddLine(format(T("tipTaken"), have, last), MUTED[1], MUTED[2], MUTED[3]) end
         if p.recs then
             tip:AddLine(format(T("tipCounts"), tonumber(p.new) or 0, tonumber(p.wait) or 0, tonumber(p.known) or 0),
                 MUTED[1], MUTED[2], MUTED[3])
@@ -3697,8 +4571,9 @@ local function setupWindow()
             if (tonumber(p.held) or 0) > 0 then state[#state + 1] = format(T("stateHeld"), p.held) end
             local last = max(tonumber(p.last) or 0, tonumber(p.whisperedAt) or 0)
             local name = tostring(p.name or (m and m.name) or key)
+            local ver = p.ver and (p.ver == "12" and T("verOld") or ("v" .. tostring(p.ver))) or "-"
             out[#out + 1] = {
-                cells = { name, concat(ways, ", "), countText(p.msgs), countText(p.recs), countText(p.new, true),
+                cells = { name, ver, concat(ways, ", "), countText(p.msgs), countText(p.recs), countText(p.new, true),
                     countText(p.whispered), last > 0 and ago(last, true) or "-", concat(state, ", ") },
                 dim = not m and last < lib.sessionStart,
                 entry = p.name and p or { name = name },
@@ -3816,8 +4691,13 @@ local function setupWindow()
         table.sort(res)
         local last = #res > 0 and concat(res, ", ") or "-"
         local note = tostring(s.note or "")
-        if note ~= "" and not note:find("sent", 1, true) and not note:find("nothing new", 1, true) then
+        if note ~= "" and not note:find("sent", 1, true) and not note:find("nothing new", 1, true)
+            and note ~= "hello" then
             last = last .. " (" .. note .. ")"
+        end
+        if lib.SyncStatus then
+            local ok, text = pcall(lib.SyncStatus, true)
+            if ok and text then last = last .. " · " .. text end
         end
         return l1, l2, format(T("sumLast"), last)
     end
@@ -4477,6 +5357,8 @@ function lib.OnEvent(event, ...)
         if C_ChatInfo and C_ChatInfo.RegisterAddonMessagePrefix then
             pcall(C_ChatInfo.RegisterAddonMessagePrefix, PREFIX)
         end
+    elseif event == "GROUP_JOINED" then
+        if lib.SyncGroupJoined then lib.SyncGroupJoined() end
     elseif event == "PLAYER_ENTERING_WORLD" and not lib.started then
         lib.started = true
         -- after the game's own channels have their numbers
@@ -4484,6 +5366,10 @@ function lib.OnEvent(event, ...)
         if C_Timer and C_Timer.NewTicker then
             C_Timer.NewTicker(SEND_EVERY, function()
                 if lib.SendTick then pcall(lib.SendTick) end
+            end)
+            -- asks and answers (numbered records)
+            C_Timer.NewTicker(2, function()
+                if lib.ServeTick then pcall(lib.ServeTick) end
             end)
         end
     end
@@ -4523,7 +5409,7 @@ end
 
 -- events added after the first version (the frame may come from an older copy)
 for _, event in ipairs({ "CHANNEL_ROSTER_UPDATE", "CHAT_MSG_CHANNEL_JOIN", "CHAT_MSG_CHANNEL_LEAVE", "MERCHANT_SHOW",
-    "TRAINER_SHOW", "GOSSIP_SHOW", "PLAYER_SOFT_INTERACT_CHANGED" }) do
+    "TRAINER_SHOW", "GOSSIP_SHOW", "PLAYER_SOFT_INTERACT_CHANGED", "GROUP_JOINED" }) do
     pcall(lib.events.RegisterEvent, lib.events, event)
 end
 
