@@ -36,7 +36,7 @@ local ADDON_NAME, ns = ...
 local type, pairs, ipairs, tonumber, tostring, pcall, next = type, pairs, ipairs, tonumber, tostring, pcall, next
 local floor, format, concat, max, min = math.floor, string.format, table.concat, math.max, math.min
 
-local LIB_VERSION = 11
+local LIB_VERSION = 12
 
 -- one table for every copy (a newer copy updates the functions in it)
 local lib = _G.EzWoW_Share
@@ -133,7 +133,8 @@ local TEXTS = {
         kindI = "Quest item source", kindD = "Quest item drop", kindO = "Quest item object", kindL = "Drop source",
         kindM = "Shop items", kindZ = "Dungeon creature", kindN = "NPC spot", kindR = "Rare sighting",
         kindG = "Gathering spot", kindF = "Fishing spot", kindT = "Flight time", kindB = "Boss spot",
-        kindW = "Quest rewards", kindU = "Trainer spells", kindJ = "Object name",
+        kindW = "Quest rewards", kindU = "Trainer spells", kindJ = "Object name", kindP = "Shop side", kindX = "Zone exit",
+        sideA = "Alliance", sideH = "Horde", sideN = "Neutral",
         descRewards = "%s · rewards %d, choices %d", descTeaches = "%s · %d spells",
         noteLang = "other language %d", noteLimit = "over the limit",
         stateListed = "on the channel list", stateUnknown = "faction unknown", stateAway = "left out for now",
@@ -208,7 +209,8 @@ local TEXTS = {
         kindI = "퀘스트 아이템 출처", kindD = "퀘스트 아이템 드롭", kindO = "퀘스트 아이템 오브젝트",
         kindL = "드롭 출처", kindM = "상점 물건", kindZ = "던전 몬스터", kindN = "NPC 위치",
         kindR = "희귀 몬스터 목격", kindG = "채집 위치", kindF = "낚시 자리", kindT = "비행 시간", kindB = "보스 위치",
-        kindW = "퀘스트 보상", kindU = "트레이너 주문", kindJ = "오브젝트 이름",
+        kindW = "퀘스트 보상", kindU = "트레이너 주문", kindJ = "오브젝트 이름", kindP = "상점 진영", kindX = "지역 입구",
+        sideA = "얼라이언스", sideH = "호드", sideN = "중립",
         descRewards = "%s · 보상 %d, 선택 %d", descTeaches = "%s · 주문 %d개",
         noteLang = "언어 다름 %d", noteLimit = "받기 한도 넘음",
         stateListed = "채널 명단", stateUnknown = "진영 모름", stateAway = "잠시 뺌",
@@ -1355,9 +1357,9 @@ local V2_KINDS = { R = true, L = true, G = true }
 --                                  exchange it (records holding names)
 --   spec.describe(body)         -> text for the shared records window, or nil
 --                                  (then the general text of the kind)
--- Codes in use: M shops, Z dungeon creatures, W quest rewards, U trainer spells,
--- J object names (this file); F fishing spots (Smart Fishing), T flight times
--- (Flight Map), N NPC spots (Map Finder), Q quest offers (Quest), B boss areas
+-- Codes in use: M shops, P shop sides and spots, Z dungeon creatures, W quest
+-- rewards, U trainer spells, J object names (this file); F fishing spots (Smart Fishing), T flight times
+-- (Flight Map), N NPC spots and X zone exits (Map Finder), Q quest offers (Quest), B boss areas
 -- (Dungeon Route Guide).
 -----------------------------------------------------------------------------
 lib.kinds = lib.kinds or {}
@@ -1421,6 +1423,7 @@ function lib.OnMerchantShow()
     local okGuid, guid = pcall(UnitGUID, "npc")
     local src, npcID = guidSource(okGuid and guid or nil)
     if not src or src:sub(1, 1) ~= "n" then return end
+    if lib.NotePlace then pcall(lib.NotePlace, npcID) end
     local okN, n = pcall(GetMerchantNumItems)
     n = okN and tonumber(n) or 0
     if isSecret(n) or n <= 0 then return end
@@ -1444,7 +1447,8 @@ function lib.OnMerchantShow()
 end
 
 -- itemID -> list of npcIDs that sell it: this character's shops, items
--- confirmed by other players, then the records shipped with the addons
+-- confirmed by other players, then the records shipped with the addons.
+-- Shops of the other faction are left out (nil when none is left).
 function lib.GetVendors(itemID)
     itemID = tonumber(itemID)
     if not itemID then return nil end
@@ -1481,7 +1485,22 @@ function lib.GetVendors(itemID)
         end
         lib.reverseVendors = rev
     end
-    return lib.reverseVendors[itemID]
+    local list = lib.reverseVendors[itemID]
+    if not list or type(lib.IsOtherSide) ~= "function" then return list end
+    local out
+    for i, npcID in ipairs(list) do
+        local okSide, other = pcall(lib.IsOtherSide, npcID)
+        if okSide and other then
+            if not out then
+                out = {}
+                for j = 1, i - 1 do out[j] = list[j] end
+            end
+        elseif out then
+            out[#out + 1] = npcID
+        end
+    end
+    if not out then return list end
+    return #out > 0 and out or nil
 end
 
 lib.RegisterKind(VENDOR_KIND, {
@@ -1540,6 +1559,145 @@ lib.RegisterKind(VENDOR_KIND, {
         return any or (waiting and "wait") or false
     end,
 })
+
+-----------------------------------------------------------------------------
+-- The side of a shop NPC and where it stands, noted when its shop window
+-- opens (record kind "P": "npcID,side[,continent,x,y]"; side A Alliance,
+-- H Horde, N neither). The side keeps the other faction's shops out of the
+-- "sold by" lists. The spot goes to EzWoW - Map Finder's NPC spots (kind "N")
+-- of the players who have it, so shops seen by players without it get a
+-- place on the map too. A side from other players counts once enough
+-- different players sent it (see lib.Vote).
+-- store P: [npcID] = { side = own note, spot = { continent, x, y }, got = confirmed side }
+-----------------------------------------------------------------------------
+do
+    local PLACE_KIND = "P"
+    local GROUP_SIDE = { Alliance = "A", Horde = "H" }
+    local VALID_SIDE = { A = true, H = true, N = true }
+
+    local function placeStore()
+        return lib.Store(PLACE_KIND)
+    end
+
+    -- "A", "H" or "N" for a unit (nil: not known)
+    local function unitSide(unit)
+        if type(UnitFactionGroup) ~= "function" then return nil end
+        local ok, group = pcall(UnitFactionGroup, unit)
+        if not ok or isSecret(group) then return nil end
+        return GROUP_SIDE[group] or "N"
+    end
+
+    local mySide
+    function lib.MySide()
+        if not mySide then
+            local side = unitSide("player")
+            if side == "A" or side == "H" then mySide = side end
+        end
+        return mySide
+    end
+
+    -- the shop window of this NPC is open
+    function lib.NotePlace(npcID)
+        if type(npcID) ~= "number" then return end
+        local side = unitSide("npc")
+        if not side then return end
+        local spot
+        if not (IsInInstance and IsInInstance()) then spot = playerSpot() end
+        local t = placeStore()
+        local row = type(t[npcID]) == "table" and t[npcID] or {}
+        -- where the player stood: a new spot only when 15 yards or more away
+        local old = type(row.spot) == "table" and row.spot or nil
+        local moved = spot and not (old and old[1] == spot[1] and type(old[2]) == "number" and type(old[3]) == "number"
+            and (old[2] - spot[2]) ^ 2 + (old[3] - spot[3]) ^ 2 < 15 * 15)
+        if row.side == side and not moved then return end
+        row.side = side
+        if moved then row.spot = spot end
+        t[npcID] = row
+        changed(PLACE_KIND)
+    end
+
+    -- an NPC's side: Alliance or Horde as this character or other players
+    -- saw it, else as the shipped records have it; "N" when only "neither"
+    -- was seen (nil: not known). A seen "N" does not override a known side:
+    -- the game may not give a side for every NPC.
+    function lib.NpcSide(npcID)
+        npcID = tonumber(npcID)
+        if not npcID then return nil end
+        local row = placeStore()[npcID]
+        local own = type(row) == "table" and row.side or nil
+        local got = type(row) == "table" and row.got or nil
+        if own == "A" or own == "H" then return own end
+        if got == "A" or got == "H" then return got end
+        local seed = lib.Seed("sides")
+        local shipped = seed and seed[npcID]
+        if shipped == "A" or shipped == "H" then return shipped end
+        if own == "N" or got == "N" then return "N" end
+        return nil
+    end
+
+    -- true for an NPC of the other faction (never for a shop this character used)
+    function lib.IsOtherSide(npcID)
+        local mine = lib.MySide()
+        npcID = tonumber(npcID)
+        if not (mine and npcID) then return false end
+        local row = placeStore()[npcID]
+        if type(row) == "table" and row.side then return false end
+        local side = lib.NpcSide(npcID)
+        return (side == "A" or side == "H") and side ~= mine
+    end
+
+    lib.RegisterKind(PLACE_KIND, {
+        own = function()
+            local out = {}
+            for npcID, row in pairs(placeStore()) do
+                if type(npcID) == "number" and type(row) == "table" and VALID_SIDE[row.side] then
+                    local text = spotText(row.spot)
+                    out[#out + 1] = npcID .. "," .. row.side .. (text and ("," .. text) or "")
+                end
+            end
+            return out
+        end,
+        receive = function(body, hash, needed)
+            local npcID, side, rest = body:match("^(%d+),([AHN]),?(.*)$")
+            npcID = intIn(npcID, 1, 10000000)
+            if not npcID then return false end
+            local result = false
+            local t = placeStore()
+            local row = type(t[npcID]) == "table" and t[npcID] or nil
+            -- this character's own note or a side confirmed already: no vote
+            if not (row and (row.side or row.got)) then
+                local key = "P:" .. npcID
+                local n = lib.Vote(key, side, hash, needed)
+                if n and n >= (tonumber(needed) or 2) then
+                    row = row or {}
+                    row.got = side
+                    t[npcID] = row
+                    lib.VoteDone(key)
+                    result = true
+                elseif n then
+                    result = "wait"
+                end
+            end
+            -- the spot: Map Finder checks it against its data and counts it
+            local spot = rest ~= "" and parseSpot(rest) or nil
+            local spots = lib.kinds.N
+            if spot and type(spots) == "table" and type(spots.receive) == "function" then
+                local ok, r = pcall(spots.receive, format("%d,%d,%.1f,%.1f,5", npcID, spot[1], spot[2], spot[3]), hash, needed)
+                if ok and r == true then
+                    result = true
+                elseif ok and r == "wait" and not result then
+                    result = "wait"
+                end
+            end
+            return result
+        end,
+        describe = function(body)
+            local npcID, side = body:match("^(%d+),([AHN])")
+            if not npcID then return nil end
+            return format(T("descIn"), lib.SourceName("n" .. npcID) or ("#" .. npcID), T("side" .. side))
+        end,
+    })
+end
 
 -----------------------------------------------------------------------------
 -- The dungeon a creature was looted in (record kind "Z": "npcID,instanceMapID").
@@ -3141,7 +3299,7 @@ local function setupWindow()
     local BTN, BTN_ON = { 0.114, 0.157, 0.192, 1 }, { 0.12, 0.30, 0.37, 1 }
     local BORDER, BORDER_ON = { 0.204, 0.298, 0.357, 1 }, { 0.29, 0.78, 0.91, 1 }
     local MUTED, BODY = { 0.65, 0.72, 0.77 }, { 0.93, 0.96, 0.97 }
-    local KIND_ORDER = { "S", "E", "Q", "V", "I", "D", "O", "L", "M", "Z", "N", "R", "G", "F", "T", "B", "W", "U", "J" }
+    local KIND_ORDER = { "S", "E", "Q", "V", "I", "D", "O", "L", "M", "P", "Z", "N", "X", "R", "G", "F", "T", "B", "W", "U", "J" }
     local TABS = { "recv", "people", "sent", "kinds" }
     local TAB_TITLES = { recv = "tabRecv", people = "tabPeople", sent = "tabSent", kinds = "tabKinds" }
     local WAYS = { CHANNEL = "wayChannel", WHISPER = "wayWhisper", GUILD = "wayGuild", PARTY = "wayParty",
