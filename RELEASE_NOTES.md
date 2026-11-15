@@ -1,7 +1,7 @@
-# v2.0.17
+# v2.0.18
 
 ### 한국어
-- EzWoW 사용자들이 잰 비행 시간을 기본 데이터로 넣어, 직접 타 보지 않은 경로도 처음부터 실제 시간이 나옵니다.
+- 공유 기록에 상점 NPC의 진영과 위치를 함께 남겨, 판매처 목록에서 다른 진영 상인을 뺄 수 있게 했습니다.
 
 ### English
-- Flight times measured by EzWoW users are now built in, so routes you have not flown show real times from the start.
+- Shared records now keep the faction and location of shop NPCs, so vendor lists can leave out the other faction's vendors.
