@@ -182,6 +182,17 @@ function EzWoWFlightMapPinMixin:SetPassThroughButtons(...)
     getmetatable(self).__index.SetPassThroughButtons(self, ...)
 end
 
+-- the mouse propagation setters are protected in combat the same way
+function EzWoWFlightMapPinMixin:SetPropagateMouseClicks(...)
+    if InCombatLockdown() then return end
+    getmetatable(self).__index.SetPropagateMouseClicks(self, ...)
+end
+
+function EzWoWFlightMapPinMixin:SetPropagateMouseMotion(...)
+    if InCombatLockdown() then return end
+    getmetatable(self).__index.SetPropagateMouseMotion(self, ...)
+end
+
 function EzWoWFlightMapPinMixin:OnLoad()
     self:UseFrameLevelType("PIN_FRAME_LEVEL_FLIGHT_POINT")
     self:SetScalingLimits(1, 1, 1)
@@ -598,6 +609,36 @@ local function attachMapLayer(map, layer)
     map:HookScript("OnHide", function() run("OnHide") end)
 end
 
+-- The game's own flight point pins are hidden while ours are on (and shown again
+-- when off) with widget calls only. Removing or refreshing the game's pins from
+-- addon code taints the map's pin pools, and the game's pins (quest pins too) are
+-- then blocked in combat (SetPassThroughButtons). Their mouse only changes out of
+-- combat; the original mouse state is kept in our own table, not on the pin.
+local STOCK_PIN = "FlightPointPinTemplate"
+local stockMouse = setmetatable({}, { __mode = "k" })
+function WorldMapPinProvider.applyStockPins()
+    if not (WorldMapFrame and WorldMapFrame.EnumeratePinsByTemplate) then return end
+    local hide = WorldMapPinProvider.isFeatureEnabled()
+    local mouseOk = not InCombatLockdown()
+    WorldMapPinProvider.stockMousePending = not mouseOk
+    for pin in WorldMapFrame:EnumeratePinsByTemplate(STOCK_PIN) do
+        pin:SetAlpha(hide and 0 or 1)
+        if mouseOk then
+            if hide then
+                if not stockMouse[pin] then
+                    stockMouse[pin] = { pin:IsMouseClickEnabled(), pin:IsMouseMotionEnabled() }
+                end
+                pin:SetMouseClickEnabled(false)
+                pin:SetMouseMotionEnabled(false)
+            elseif stockMouse[pin] then
+                pin:SetMouseClickEnabled(stockMouse[pin][1])
+                pin:SetMouseMotionEnabled(stockMouse[pin][2])
+                stockMouse[pin] = nil
+            end
+        end
+    end
+end
+
 function WorldMapPinProvider.installWorldMapPinProvider()
     if WorldMapDataProvider or not (WorldMapFrame and WorldMapFrame.OnMapChanged
         and MapCanvasDataProviderMixin and MapCanvasPinMixin
@@ -633,9 +674,7 @@ function WorldMapPinProvider.installWorldMapPinProvider()
             or stock.ezWoWFlightMapHooked then return end
         stock.ezWoWFlightMapHooked = true
         hooksecurefunc(stock, "RefreshAllData", function(p)
-            if WorldMapPinProvider.isFeatureEnabled() and p:GetMap() == WorldMapFrame then
-                WorldMapFrame:RemoveAllPinsByTemplate("FlightPointPinTemplate")
-            end
+            if p:GetMap() == WorldMapFrame then WorldMapPinProvider.applyStockPins() end
         end)
     end
     for p in pairs(WorldMapFrame.dataProviders or {}) do bindStock(WorldMapFrame, p) end
@@ -655,15 +694,9 @@ function ns.RefreshWorldMap()
         _G.EzWoWWorldMapDock:Layout()
     end
     if not (WorldMapDataProvider and WorldMapFrame:IsShown()) then return end
-    -- Refreshing every provider makes the stock pins run protected calls from
-    -- this addon, which is blocked in combat: only our pins now, the rest later.
-    if InCombatLockdown() then
-        WorldMapDataProvider:RefreshAllData()
-        WorldMapPinProvider.fullRefreshPending = true
-        return
-    end
-    WorldMapFrame:RefreshAllDataProviders()
-    -- our layer is not one of the map's providers: refresh it on its own
+    -- Only our layer and the look of the game's flight pins: refreshing the map's
+    -- providers from addon code would taint the game's pins (see applyStockPins).
+    WorldMapPinProvider.applyStockPins()
     WorldMapDataProvider:RefreshAllData()
 end
 
@@ -674,10 +707,8 @@ events:RegisterEvent("UNIT_FACTION")
 events:RegisterEvent("PLAYER_REGEN_ENABLED")
 events:SetScript("OnEvent", function(_, event, name)
     if event == "PLAYER_REGEN_ENABLED" then
-        if WorldMapPinProvider.fullRefreshPending then
-            WorldMapPinProvider.fullRefreshPending = false
-            ns.RefreshWorldMap()
-        end
+        -- the game's flight pins made in combat get their mouse turned off now
+        if WorldMapPinProvider.stockMousePending then WorldMapPinProvider.applyStockPins() end
     elseif event == "UNIT_FACTION" then
         if name == "player" then ns.RefreshWorldMap() end
     elseif event == "PLAYER_LOGIN" or name == ADDON_NAME or name == "Blizzard_WorldMap" then
