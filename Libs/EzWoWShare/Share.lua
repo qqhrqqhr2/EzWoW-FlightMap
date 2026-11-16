@@ -39,7 +39,7 @@ local ADDON_NAME, ns = ...
 local type, pairs, ipairs, tonumber, tostring, pcall, next = type, pairs, ipairs, tonumber, tostring, pcall, next
 local floor, format, concat, max, min = math.floor, string.format, table.concat, math.max, math.min
 
-local LIB_VERSION = 14
+local LIB_VERSION = 15
 
 -- one table for every copy (a newer copy updates the functions in it)
 local lib = _G.EzWoW_Share
@@ -1243,9 +1243,17 @@ local function keepQuestAlt(storeName, q, value, spot, n)
         alt[q] = row
         return
     end
-    local count = 0
-    for _ in pairs(row) do count = count + 1 end
-    if count >= MAX_QUEST_ALTS then return end
+    -- a full list lets go of the one fewest players reported, for one with more
+    local count, low, lowN = 0, nil, nil
+    for v, e in pairs(row) do
+        count = count + 1
+        local en = type(e) == "table" and tonumber(e.n) or 0
+        if not lowN or en < lowN then low, lowN = v, en end
+    end
+    if count >= MAX_QUEST_ALTS then
+        if not low or (tonumber(n) or 0) <= lowN then return end
+        row[low] = nil
+    end
     row[value] = { spot = spot, n = n }
     alt[q] = row
     changed("quest")
@@ -1292,13 +1300,14 @@ local function receiveQuestNpc(code, storeName, body, hash, needed)
         keepQuestAlt(storeName, q, value, entry.p, entry.n)
         return
     end
-    if type(current) == "table" and type(current.key) == "string" then
-        keepQuestAlt(storeName, q, current.key, current.spot, current.n)
-    end
+    -- the new one leaves the alternates first (room for the one it replaces)
     local alt = lib.Data().quest[storeName .. "Alt"]
     if type(alt) == "table" and type(alt[q]) == "table" then
         alt[q][value] = nil
         if next(alt[q]) == nil then alt[q] = nil end
+    end
+    if type(current) == "table" and type(current.key) == "string" then
+        keepQuestAlt(storeName, q, current.key, current.spot, current.n)
     end
     store[q] = { key = value, spot = entry.p, shared = true, n = entry.n }
     changed("quest")
@@ -3339,6 +3348,16 @@ do
 
     local function refreshAt() return now() + REFRESH_MIN + rand(0, REFRESH_SPAN) end
 
+    -- a log no longer kept: its notes of records passed by go too
+    function sync.forgetLog(s, id)
+        s.peers[id] = nil
+        if type(s.skipped) == "table" then
+            for _, logs in pairs(s.skipped) do
+                if type(logs) == "table" then logs[id] = nil end
+            end
+        end
+    end
+
     local function peer(id, sender)
         local s = D()
         local p = s.peers[id]
@@ -3349,7 +3368,7 @@ do
                 local at = type(v) == "table" and tonumber(v.t) or 0
                 if not oldAt or at < oldAt then oldId, oldAt = k, at end
             end
-            if n >= PEERS_MAX and oldId then s.peers[oldId] = nil end
+            if n >= PEERS_MAX and oldId then sync.forgetLog(s, oldId) end
             p = { h = 0, l = 0, r = refreshAt() }
             s.peers[id] = p
         end
@@ -3481,8 +3500,9 @@ do
                 elseif lib.devJournal then
                     pcall(lib.devJournal, sender, way, kind, body, "cut")
                 end
-            elseif kind and v == "2" then
-                -- a kind no addon here takes (noted below once the log moves on)
+            elseif kind and v == "2" and ("NXTBFQ"):find(kind, 1, true) then
+                -- a kind of an EzWoW addon that is not loaded here (noted below
+                -- once the log moves on); other letters are not kept
                 passedBy = passedBy or {}
                 passedBy[kind] = true
             end
@@ -3504,7 +3524,14 @@ do
                     local logs = type(s.skipped[kind]) == "table" and s.skipped[kind] or {}
                     s.skipped[kind] = logs
                     local at = tonumber(logs[id])
-                    if not at or from < at then logs[id] = from end
+                    if at then
+                        if from < at then logs[id] = from end
+                    else
+                        -- at most one note a kept log (PEERS_MAX) a kind
+                        local n = 0
+                        for _ in pairs(logs) do n = n + 1 end
+                        if n < PEERS_MAX then logs[id] = from end
+                    end
                 end
             end
             p.h = to
@@ -3586,7 +3613,7 @@ do
         local s, n = D(), now()
         for id, p in pairs(s.peers) do
             if type(p) ~= "table" or n - (tonumber(p.t) or 0) > PEER_KEEP then
-                s.peers[id] = nil
+                sync.forgetLog(s, id)
             else
                 if tonumber(p.r) and n > p.r then
                     p.h, p.r = 0, refreshAt()
@@ -4014,8 +4041,13 @@ function lib.SyncRetakeSkipped()
     if type(skipped) ~= "table" then return end
     local peers = type(sync.peers) == "table" and sync.peers or {}
     for kind, logs in pairs(skipped) do
-        if type(logs) ~= "table" then
-            skipped[kind] = nil                  -- an older note without logs
+        if type(logs) == "table" then
+            for id in pairs(logs) do
+                if type(peers[id]) ~= "table" then logs[id] = nil end
+            end
+        end
+        if type(logs) ~= "table" or not next(logs) then
+            skipped[kind] = nil                  -- an older note without logs, or none left
         elseif lib.kinds[kind] then
             for id, from in pairs(logs) do
                 local p = peers[id]
