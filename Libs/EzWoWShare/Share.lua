@@ -39,7 +39,7 @@ local ADDON_NAME, ns = ...
 local type, pairs, ipairs, tonumber, tostring, pcall, next = type, pairs, ipairs, tonumber, tostring, pcall, next
 local floor, format, concat, max, min = math.floor, string.format, table.concat, math.max, math.min
 
-local LIB_VERSION = 13
+local LIB_VERSION = 14
 
 -- one table for every copy (a newer copy updates the functions in it)
 local lib = _G.EzWoW_Share
@@ -114,6 +114,7 @@ local TEXTS = {
         seenShared = "Seen %s ago (shared)",
         droppedBy = "Drops from",
         soldBy = "Sold by",
+        fromOthers = "(%d shared)",
         andMore = "+%d more",
         manyDrops = "many creatures (%d)",
         manyVendors = "many vendors (%d)",
@@ -127,7 +128,14 @@ local TEXTS = {
         colTime = "Time", colFrom = "From", colWay = "Way", colKind = "Kind", colRecords = "Records",
         colNew = "New", colNote = "Note", colName = "Player", colWays = "Received via", colMsgs = "Messages",
         colWhispered = "Whispered", colLast = "Last", colState = "State", colTo = "To", colResult = "Result",
-        colReceived = "Received", colSentRecs = "Sent", colOwn = "Mine",
+        colReceived = "Received", colSentRecs = "Sent", colOwn = "Mine", colInUse = "In use", colWhere = "Shown in",
+        whereE = "Quest map ?, NPC tooltips", whereS = "Quest map !, NPC tooltips", whereQ = "Quest givers (!)",
+        whereV = "Quest objective spots", whereI = "Quest item spots", whereD = "Quest item spots",
+        whereO = "Quest item spots", whereL = "Item tooltip drops, recipes, gear", whereM = "Item tooltip sold by, recipes, gear",
+        whereP = "Hides other-faction shops", whereZ = "Dungeon of gear sources", whereN = "Map Finder spots",
+        whereX = "Zone map exits", whereR = "Rare tooltip, alerts", whereG = "Herb and ore map icons",
+        whereF = "Fishing map (gold pins)", whereT = "Flight times", whereB = "Dungeon boss areas",
+        whereW = "Item tooltip quest source, gear", whereU = "Recipe trainers", whereJ = "Drop source names",
         colWait = "Waiting", colKnown = "Had", colContent = "What came in", colFresh = "Found now",
         tipFresh = "%d found this session went first",
         wayChannel = "Channel", wayWhisper = "Whisper", wayGuild = "Guild", wayParty = "Party", wayRaid = "Raid",
@@ -196,6 +204,7 @@ local TEXTS = {
         seenShared = "%s 전 목격 (공유)",
         droppedBy = "드롭",
         soldBy = "판매",
+        fromOthers = "(공유 %d)",
         andMore = "외 %d곳",
         manyDrops = "여러 몬스터 (%d곳)",
         manyVendors = "여러 상인 (%d곳)",
@@ -209,7 +218,14 @@ local TEXTS = {
         colTime = "시간", colFrom = "보낸 사람", colWay = "경로", colKind = "종류", colRecords = "기록",
         colNew = "새 기록", colNote = "비고", colName = "이름", colWays = "받은 경로", colMsgs = "메시지",
         colWhispered = "귓속말 보냄", colLast = "마지막", colState = "상태", colTo = "받는 곳", colResult = "결과",
-        colReceived = "받은 기록", colSentRecs = "보낸 기록", colOwn = "내 기록",
+        colReceived = "받은 기록", colSentRecs = "보낸 기록", colOwn = "내 기록", colInUse = "쓰는 중", colWhere = "보이는 곳",
+        whereE = "퀘스트 지도 ?·NPC 툴팁", whereS = "퀘스트 지도 !·NPC 툴팁", whereQ = "퀘스트 주는 NPC (!)",
+        whereV = "퀘스트 목표 위치", whereI = "퀘스트 아이템 위치", whereD = "퀘스트 아이템 위치",
+        whereO = "퀘스트 아이템 위치", whereL = "아이템 툴팁 드롭·도안·장비", whereM = "아이템 툴팁 판매·도안·장비",
+        whereP = "다른 진영 상점 거르기", whereZ = "장비 출처의 던전 이름", whereN = "지도 찾기 위치",
+        whereX = "지역 지도 입구", whereR = "희귀 몬스터 툴팁·알림", whereG = "약초·광석 지도 아이콘",
+        whereF = "낚시 지도 (금색 핀)", whereT = "비행 소요 시간", whereB = "던전 보스 위치",
+        whereW = "아이템 툴팁 퀘스트 출처·장비", whereU = "도안 트레이너", whereJ = "드롭 출처 이름",
         colWait = "확인 대기", colKnown = "이미 있음", colContent = "받은 내용", colFresh = "새로 찾음",
         tipFresh = "이번 접속에 새로 찾은 기록 %d개를 먼저 보냄",
         wayChannel = "채널", wayWhisper = "귓속말", wayGuild = "길드", wayParty = "파티", wayRaid = "공격대",
@@ -299,8 +315,11 @@ lib.Ago = ago
 -----------------------------------------------------------------------------
 -- Saved data
 -----------------------------------------------------------------------------
+-- questGiversAlt / questEndersAlt: [questID] = { ["npc:ID" | "object:ID"] = { spot, n } },
+-- givers and turn-ins other players confirmed besides the stored one (a quest
+-- some innkeepers or trainers all take)
 local QUEST_KEYS = { "questEnders", "questGivers", "questEventSpots", "questEventShared",
-    "questDropItems", "questDropSources", "questShareInbox" }
+    "questDropItems", "questDropSources", "questShareInbox", "questGiversAlt", "questEndersAlt" }
 
 local function fresh()
     local d = { v = 1, settings = {}, quest = {}, rare = {}, drops = {}, gather = {}, names = {}, inbox = {}, ext = {}, sync = {} }
@@ -591,12 +610,17 @@ local function guidSource(guid)
     return nil
 end
 
+-- the unit the quest window belongs to decides: "npc" may still be an earlier
+-- talk when the window comes from a player sharing a quest or from an item
 local function questPartnerKey()
     for _, unit in ipairs({ "questnpc", "npc" }) do
         local ok, guid = pcall(UnitGUID, unit)
-        local src, id
-        if ok then src, id = guidSource(guid) end
-        if src then return (src:sub(1, 1) == "n" and "npc:" or "object:") .. id end
+        if not ok or isSecret(guid) then return nil end
+        if guid ~= nil then
+            local src, id = guidSource(guid)
+            if not src then return nil end
+            return (src:sub(1, 1) == "n" and "npc:" or "object:") .. id
+        end
     end
     return nil
 end
@@ -703,7 +727,18 @@ local function addGatherSpot(objectID, spot, shared)
         if not shared and near.shared then near.shared = nil end
         return false
     end
-    if #list >= GATHER_MAX then return false end
+    if #list >= GATHER_MAX then
+        -- full: an own spot takes the place of one other players sent (theirs
+        -- never push out own ones)
+        if shared then return false end
+        for i = #list, 1, -1 do
+            if type(list[i]) == "table" and list[i].shared then
+                list[i] = spot
+                return true
+            end
+        end
+        return false
+    end
     if shared then spot.shared = true end
     list[#list + 1] = spot
     return true
@@ -819,7 +854,8 @@ function lib.GetDropSources(itemID)
                 for id, v in pairs(items) do
                     if type(id) == "number" then
                         rev[id] = rev[id] or {}
-                        rev[id][#rev[id] + 1] = { src = src, own = type(v) == "number" and v or nil }
+                        rev[id][#rev[id] + 1] = { src = src, own = type(v) == "number" and v or nil,
+                            shared = v == "s" or nil }
                     end
                 end
             end
@@ -894,6 +930,12 @@ function lib.SourceName(src, locale)
     if mapName and not mapTakesLocale then
         local n = ask(mapName)
         if n then return n end
+    end
+    -- an object's name other players sent (same client language only)
+    if kind == "object" and type(lib.ObjectName) == "function"
+        and locale == (localeCode(GetLocale and GetLocale()) or "enUS") then
+        local ok, n = pcall(lib.ObjectName, id)
+        if ok and type(n) == "string" and n ~= "" and not isSecret(n) then return n end
     end
     return seen
 end
@@ -1188,6 +1230,27 @@ local function voteDone(which, key)
     kinds[k] = max(0, (kinds[k] or 0) - 1)
 end
 
+-- a giver or turn-in other players confirmed besides the stored one
+local MAX_QUEST_ALTS = 4
+local function keepQuestAlt(storeName, q, value, spot, n)
+    local alt = lib.Data().quest[storeName .. "Alt"]
+    if type(alt) ~= "table" then return end
+    local row = type(alt[q]) == "table" and alt[q] or {}
+    local cur = row[value]
+    if type(cur) == "table" then
+        if (tonumber(n) or 0) > (tonumber(cur.n) or 0) then cur.n = n end
+        if cur.spot == nil then cur.spot = spot end
+        alt[q] = row
+        return
+    end
+    local count = 0
+    for _ in pairs(row) do count = count + 1 end
+    if count >= MAX_QUEST_ALTS then return end
+    row[value] = { spot = spot, n = n }
+    alt[q] = row
+    changed("quest")
+end
+
 -- E / S: who takes a quest in / gives it out "questID,n|o,ID[,continent,x,y]"
 local function receiveQuestNpc(code, storeName, body, hash, needed)
     local q, k, id, rest = body:match("^(%d+),([no]),(%d+),?(.*)$")
@@ -1213,17 +1276,56 @@ local function receiveQuestNpc(code, storeName, body, hash, needed)
         return
     end
     if entry.n < needed then
-        -- waits for more players (unless this character has its own record)
-        if not (type(current) == "table" and not current.shared) then
-            activity.pend = activity.pend + 1
-        end
+        -- waits for more players (besides this character's own record it can
+        -- become an alternate one)
+        activity.pend = activity.pend + 1
         return
     end
-    if type(current) == "table" and not current.shared then return end
-    -- a different value replaces a confirmed one only when more players report it
-    if type(current) == "table" and entry.n <= (current.n or 0) then return end
+    -- this character's own record stays; the other one is kept besides it
+    if type(current) == "table" and not current.shared then
+        keepQuestAlt(storeName, q, value, entry.p, entry.n)
+        return
+    end
+    -- a different value replaces a confirmed one only when more players report
+    -- it; the one with fewer players is kept besides it
+    if type(current) == "table" and entry.n <= (current.n or 0) then
+        keepQuestAlt(storeName, q, value, entry.p, entry.n)
+        return
+    end
+    if type(current) == "table" and type(current.key) == "string" then
+        keepQuestAlt(storeName, q, current.key, current.spot, current.n)
+    end
+    local alt = lib.Data().quest[storeName .. "Alt"]
+    if type(alt) == "table" and type(alt[q]) == "table" then
+        alt[q][value] = nil
+        if next(alt[q]) == nil then alt[q] = nil end
+    end
     store[q] = { key = value, spot = entry.p, shared = true, n = entry.n }
     changed("quest")
+end
+
+-- givers and turn-ins other players confirmed before more than one was kept
+-- wait in the vote inbox: at login they are kept besides the stored one
+function lib.AdoptWaitingQuestAlts()
+    local box, tag = inboxOf("quest")
+    local q = lib.Data().quest
+    for key, row in pairs(box) do
+        local code, qid = tostring(key):sub(#tag + 1):match("^([ES]):(%d+)$")
+        qid = tonumber(qid)
+        if code and qid and type(row) == "table" and type(row.v) == "table" then
+            local storeName = code == "E" and "questEnders" or "questGivers"
+            local current = q[storeName][qid]
+            local mainKey = type(current) == "table" and current.key or nil
+            if type(mainKey) == "string" then
+                for value, entry in pairs(row.v) do
+                    if type(value) == "string" and value ~= mainKey and value:match("^%a+:%d+$")
+                        and type(entry) == "table" and (tonumber(entry.n) or 0) >= CONFIRM_PUBLIC then
+                        keepQuestAlt(storeName, qid, value, entry.p, entry.n)
+                    end
+                end
+            end
+        end
+    end
 end
 
 -- V: scouting spot "questID,objective,continent,x,y" (used as it arrives)
@@ -1543,7 +1645,7 @@ function lib.GetVendors(itemID)
             end
             list[#list + 1] = npcID
         end
-        local ownSeen = {}
+        local ownSeen, fromOthers = {}, {}
         for npcID, row in pairs(vendorStore()) do
             if type(npcID) == "number" and type(row) == "table" then
                 if type(row.own) == "table" then
@@ -1552,10 +1654,15 @@ function lib.GetVendors(itemID)
                 end
                 for id, ok in pairs(type(row.got) == "table" and row.got or {}) do
                     -- a shop seen here lately: its own list is the newer one
-                    if ok == true and not ownSeen[npcID] then add(id, npcID) end
+                    if ok == true and not ownSeen[npcID] then
+                        add(id, npcID)
+                        fromOthers[id] = fromOthers[id] or {}
+                        fromOthers[id][npcID] = true
+                    end
                 end
             end
         end
+        lib.vendorsFromOthers = fromOthers
         for npcID, items in pairs(lib.Seed("vendors") or {}) do
             if type(npcID) == "number" and type(items) == "table" and not ownSeen[npcID] then
                 for _, id in ipairs(items) do add(id, npcID) end
@@ -2068,6 +2175,14 @@ local function setupMoreKinds()
     -- seen before is kept)
     function lib.OnTrainerShow()
         if not lib.IsEnabled() then return end
+        -- a trainer window opened by a spell (a hunter's beast training) still
+        -- has the last NPC talked to as "npc": only a window an NPC opened is noted
+        local pim = C_PlayerInteractionManager
+        local trainerType = Enum and Enum.PlayerInteractionType and Enum.PlayerInteractionType.Trainer
+        if pim and type(pim.IsInteractingWithNpcOfType) == "function" and trainerType then
+            local okI, interacting = pcall(pim.IsInteractingWithNpcOfType, trainerType)
+            if okI and not isSecret(interacting) and interacting == false then return end
+        end
         local okGuid, guid = pcall(UnitGUID, "npc")
         local src, npcID = guidSource(okGuid and guid or nil)
         if not src or src:sub(1, 1) ~= "n" then return end
@@ -2908,10 +3023,11 @@ accept = function(text, channel, sender)
             taken = taken + 1
             stats.received = stats.received + 1
             local before, pendBefore = activity.seq, activity.pend
+            local otherLang = false
             if localized then
                 -- item names: only from players with the same client language
                 local l, rest = body:match("^(%a%a%u%u),(.+)$")
-                if l == loc then receive(kind, rest, hash, needed) else lang = lang + 1 end
+                if l == loc then receive(kind, rest, hash, needed) else lang = lang + 1; otherLang = true end
             else
                 receive(kind, body, hash, needed)
             end
@@ -2922,6 +3038,12 @@ accept = function(text, channel, sender)
             elseif activity.pend > pendBefore then
                 waiting = waiting + 1
             end
+            if lib.devJournal then
+                pcall(lib.devJournal, sender, way, kind, body, (activity.seq > before and "new")
+                    or (activity.pend > pendBefore and "wait") or (otherLang and "lang") or "known")
+            end
+        elseif lib.devJournal then
+            pcall(lib.devJournal, sender, way, kind, body, "cut")
         end
     end
     if activity.received then
@@ -3321,7 +3443,7 @@ do
         local needed = (GROUP_CHANNELS[way] or (o and o.group)) and CONFIRM_GROUP or CONFIRM_PUBLIC
         local loc = locale()
         local groups, kinds = {}, {}
-        local limited = false
+        local limited, passedBy = false, nil
         for piece in payload:gmatch("[^;]+") do
             local v, kind, body = piece:match("^(%d)(%u)(.+)$")
             if kind and ((v == "1" and V1_KINDS[kind]) or (v == "2" and (V2_KINDS[kind] or lib.kinds[kind]))) then
@@ -3338,9 +3460,10 @@ do
                     g.taken = g.taken + 1
                     stats.received = stats.received + 1
                     local before, pendBefore = activity.seq, activity.pend
+                    local otherLang = false
                     if kind == "D" or kind == "O" or (lib.kinds[kind] and lib.kinds[kind].localized) then
                         local l, rest = body:match("^(%a%a%u%u),(.+)$")
-                        if l == loc then receive(kind, rest, hash, needed) else g.lang = g.lang + 1 end
+                        if l == loc then receive(kind, rest, hash, needed) else g.lang = g.lang + 1; otherLang = true end
                     else
                         receive(kind, body, hash, needed)
                     end
@@ -3351,7 +3474,17 @@ do
                     elseif activity.pend > pendBefore then
                         g.wait = g.wait + 1
                     end
+                    if lib.devJournal then
+                        pcall(lib.devJournal, sender, way, kind, body, (activity.seq > before and "new")
+                            or (activity.pend > pendBefore and "wait") or (otherLang and "lang") or "known")
+                    end
+                elseif lib.devJournal then
+                    pcall(lib.devJournal, sender, way, kind, body, "cut")
                 end
+            elseif kind and v == "2" then
+                -- a kind no addon here takes (noted below once the log moves on)
+                passedBy = passedBy or {}
+                passedBy[kind] = true
             end
         end
         if activity.received then
@@ -3361,7 +3494,21 @@ do
             end
         end
         -- the log moves on only when this follows on and nothing was cut
-        if not limited and from <= p.h + 1 then p.h = to end
+        if not limited and from <= p.h + 1 then
+            -- records of a kind no addon here takes went by: from where this log
+            -- is taken again once such an addon is loaded (lib.SyncRetakeSkipped)
+            if passedBy then
+                local s = D()
+                s.skipped = type(s.skipped) == "table" and s.skipped or {}
+                for kind in pairs(passedBy) do
+                    local logs = type(s.skipped[kind]) == "table" and s.skipped[kind] or {}
+                    s.skipped[kind] = logs
+                    local at = tonumber(logs[id])
+                    if not at or from < at then logs[id] = from end
+                end
+            end
+            p.h = to
+        end
         if p.h >= p.l then S.asking[id], S.queue[id] = nil, nil end
         flushChanged()
     end
@@ -3856,6 +4003,32 @@ local function leaveByName(name)
     if channelIndex(name) and type(LeaveChannelByName) == "function" then pcall(LeaveChannelByName, name) end
 end
 
+-- records of a kind no addon here took were passed by (and the logs moved on):
+-- once an addon that takes that kind is loaded, every log is taken from the
+-- start again (once)
+-- sync.skipped[kind] = { [log ID] = first record number passed by }; once an
+-- addon that takes that kind is loaded, only those logs go back to there
+function lib.SyncRetakeSkipped()
+    local sync = lib.Data().sync
+    local skipped = type(sync) == "table" and sync.skipped
+    if type(skipped) ~= "table" then return end
+    local peers = type(sync.peers) == "table" and sync.peers or {}
+    for kind, logs in pairs(skipped) do
+        if type(logs) ~= "table" then
+            skipped[kind] = nil                  -- an older note without logs
+        elseif lib.kinds[kind] then
+            for id, from in pairs(logs) do
+                local p = peers[id]
+                from = tonumber(from)
+                if type(p) == "table" and from then
+                    p.h = math.min(tonumber(p.h) or 0, math.max(0, from - 1))
+                end
+            end
+            skipped[kind] = nil
+        end
+    end
+end
+
 local function later(seconds, fn)
     if C_Timer and C_Timer.After then C_Timer.After(seconds, function() pcall(fn) end) end
 end
@@ -4171,9 +4344,10 @@ local function setupWindow()
             { t = "colWhispered", w = 70, right = true }, { t = "colLast", w = 52, right = true }, { t = "colState" } },
         sent = { { t = "colTime", w = 64 }, { t = "colTo", w = 220 }, { t = "colKind", w = 130 },
             { t = "colRecords", w = 44, right = true }, { t = "colFresh", w = 76, right = true }, { t = "colResult" } },
-        kinds = { { t = "colKind", w = 180 }, { t = "colReceived", w = 90, right = true },
-            { t = "colNew", w = 90, right = true }, { t = "colWait", w = 90, right = true },
-            { t = "colSentRecs", w = 90, right = true }, { t = "colOwn", w = 90, right = true } },
+        kinds = { { t = "colKind", w = 130 }, { t = "colReceived", w = 62, right = true },
+            { t = "colNew", w = 58, right = true }, { t = "colWait", w = 62, right = true },
+            { t = "colSentRecs", w = 62, right = true }, { t = "colOwn", w = 58, right = true },
+            { t = "colInUse", w = 62, right = true }, { t = "colWhere" } },
     }
 
     local ui = { tab = "recv", offset = 0, newOnly = false }
@@ -4415,6 +4589,8 @@ local function setupWindow()
         end
         return body
     end
+    -- (a developer's journal of received records keeps this text: lib.devJournal)
+    lib.DescribeRecord = describe
 
     ---------------------------------------------------------------- tooltips
     local function addRecords(tip, kind, payload)
@@ -4631,9 +4807,90 @@ local function setupWindow()
         return counts
     end
 
+    -- records received from other players and in use now, by kind (kinds of
+    -- other addons answer through their spec's used())
+    local usedCache, usedAt = nil, -100
+    local function usedCounts()
+        if usedCache and clock() - usedAt < 15 then return usedCache end
+        local c = {}
+        local function add(code, n) if n and n > 0 then c[code] = (c[code] or 0) + n end end
+        local d = lib.Data()
+        local q = type(d.quest) == "table" and d.quest or {}
+        local function tbl(v) return type(v) == "table" and v or {} end
+        for code, key in pairs({ E = "questEnders", S = "questGivers" }) do
+            local n = 0
+            for _, v in pairs(tbl(q[key])) do
+                if type(v) == "table" and v.shared then n = n + 1 end
+            end
+            for _, alts in pairs(tbl(q[key .. "Alt"])) do
+                for _ in pairs(tbl(alts)) do n = n + 1 end
+            end
+            add(code, n)
+        end
+        local n = 0
+        for _, objectives in pairs(tbl(q.questEventShared)) do
+            for _, list in pairs(tbl(objectives)) do n = n + #tbl(list) end
+        end
+        add("V", n)
+        -- quest items: by creature ("s") and by object spot (shared)
+        local function dropFacts(t)
+            local byNpc, byObject = 0, 0
+            for _, row in pairs(tbl(t)) do
+                for _, v in pairs(tbl(row)) do
+                    if v == "s" then
+                        byNpc = byNpc + 1
+                    elseif type(v) == "table" and v.shared then
+                        byObject = byObject + 1 + #tbl(v.more)
+                    end
+                end
+            end
+            return byNpc, byObject
+        end
+        local itemNpc, itemObject = dropFacts(q.questDropItems)
+        local nameNpc, nameObject = dropFacts(q.questDropSources)
+        add("I", itemNpc + itemObject)
+        add("D", nameNpc)
+        add("O", nameObject)
+        n = 0
+        for _, items in pairs(tbl(d.drops)) do
+            for _, v in pairs(tbl(items)) do if v == "s" then n = n + 1 end end
+        end
+        add("L", n)
+        n = 0
+        for _, spots in pairs(tbl(d.gather)) do
+            for _, sp in ipairs(tbl(spots)) do if type(sp) == "table" and sp.shared then n = n + 1 end end
+        end
+        add("G", n)
+        n = 0
+        for _, v in pairs(tbl(d.rare)) do if type(v) == "table" and v.shared then n = n + 1 end end
+        add("R", n)
+        -- the library's own kinds kept as own / got: what other players confirmed
+        for _, code in ipairs({ "M", "P", "Z", "W", "U", "J" }) do
+            local m = 0
+            for _, row in pairs(tbl(tbl(d.ext)[code])) do
+                local got = type(row) == "table" and row.got
+                if type(got) == "table" then
+                    for _, ok in pairs(got) do if ok then m = m + 1 end end
+                elseif got ~= nil and got ~= false then
+                    m = m + 1
+                end
+            end
+            add(code, m)
+        end
+        for code, spec in pairs(lib.kinds) do
+            if c[code] == nil and type(spec) == "table" and type(spec.used) == "function" then
+                local ok, v = pcall(spec.used)
+                if ok and type(v) == "number" and v == v and v > 0 then c[code] = floor(v) end
+            end
+        end
+        usedCache, usedAt = c, clock()
+        return c
+    end
+
     function builders.kinds()
         local log = activity.data()
         local own = ownCounts()
+        local used = usedCounts()
         local codes, seen = {}, {}
         local function addCode(c)
             if type(c) == "string" and not seen[c] then
@@ -4648,9 +4905,13 @@ local function setupWindow()
         for _, c in ipairs(codes) do
             local k = type(log.kinds[c]) == "table" and log.kinds[c] or {}
             local r, u, s, o = tonumber(k.r) or 0, tonumber(k.u) or 0, tonumber(k.s) or 0, own[c] or 0
+            local inUse = used[c] or 0
+            local where = T("where" .. c)
+            if where == "where" .. c then where = "" end
             out[#out + 1] = {
-                cells = { kindName(c), countText(r), countText(u, true), countText(k.w), countText(s), countText(o) },
-                dim = r + s + o == 0,
+                cells = { kindName(c), countText(r), countText(u, true), countText(k.w), countText(s), countText(o),
+                    countText(inUse, true), where },
+                dim = r + s + o + inUse == 0,
             }
         end
         return out
@@ -5098,21 +5359,26 @@ function lib.DropText(itemID)
     local list = lib.GetDropSources(itemID)
     if not list or #list == 0 then return nil end
     -- sources without a known name are left out (no bare "object" word)
-    local names, seen, total = {}, {}, 0
+    local names, seen, total, shared = {}, {}, 0, 0
     for _, row in ipairs(list) do
         local name = lib.SourceName(row.src)
         if name and not seen[name] then
             seen[name] = true
             total = total + 1
+            if row.shared then shared = shared + 1 end
             if #names < tipLimit() then names[#names + 1] = name end
         end
     end
     if #names == 0 then return nil end
+    -- how many of them came from other players
+    local mark = shared > 0 and (" |cff8398A6" .. format(T("fromOthers"), shared) .. "|r") or ""
     -- dropped all over (cloth, coins...): only how many (Shift opens the first ten)
     if total >= COMMON_DROP and not (IsShiftKeyDown and IsShiftKeyDown()) then
-        return format(T("manyDrops"), total) .. " · Shift", nil
+        return format(T("manyDrops"), total) .. " · Shift" .. mark, nil
     end
-    return namesText(names, total)
+    local first, more = namesText(names, total)
+    if first then first = first .. mark end
+    return first, more
 end
 
 -- Recipe scrolls among the shops and drops seen: a scroll's name is
@@ -5265,16 +5531,20 @@ end
 function lib.VendorText(itemID)
     local list = lib.GetVendors(itemID)
     if not list or #list == 0 then return nil end
-    local rows, seen = {}, {}
+    local rows, seen, shared = {}, {}, 0
     local here = #list > tipLimit() and playerSpot() or nil
+    local others = lib.vendorsFromOthers and lib.vendorsFromOthers[tonumber(itemID)]
     for _, npcID in ipairs(list) do
         local name = lib.SourceName("n" .. npcID)
         if name and not seen[name] then
             seen[name] = true
             rows[#rows + 1] = { name = name, d = distanceTo(here, npcID) }
+            if others and others[npcID] then shared = shared + 1 end
         end
     end
     if #rows == 0 then return nil end
+    -- how many of them came from other players
+    local mark = shared > 0 and (" |cff8398A6" .. format(T("fromOthers"), shared) .. "|r") or ""
     -- known distance first (closest first), the rest in their order
     for i, row in ipairs(rows) do row.i = i end
     table.sort(rows, function(a, b)
@@ -5284,11 +5554,13 @@ function lib.VendorText(itemID)
     end)
     -- sold all over: only how many (Shift opens the ten closest)
     if #rows >= COMMON_DROP and not (IsShiftKeyDown and IsShiftKeyDown()) then
-        return format(T("manyVendors"), #rows) .. " · Shift", nil
+        return format(T("manyVendors"), #rows) .. " · Shift" .. mark, nil
     end
     local names = {}
     for i = 1, math.min(#rows, tipLimit()) do names[i] = rows[i].name end
-    return namesText(names, #rows)
+    local first, more = namesText(names, #rows)
+    if first then first = first .. mark end
+    return first, more
 end
 
 -- true when a line was added
@@ -5361,6 +5633,8 @@ function lib.OnEvent(event, ...)
         if lib.SyncGroupJoined then lib.SyncGroupJoined() end
     elseif event == "PLAYER_ENTERING_WORLD" and not lib.started then
         lib.started = true
+        pcall(lib.SyncRetakeSkipped)
+        pcall(lib.AdoptWaitingQuestAlts)
         -- after the game's own channels have their numbers
         later(12, lib.JoinChannel)
         if C_Timer and C_Timer.NewTicker then

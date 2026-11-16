@@ -51,6 +51,7 @@ WoW Forever (`Interface: 16001`) · `/ezfl` · `/미니게임`
 | `무료` / `미확인` | 요금이 0인 경로 / 요금을 확인할 수 없는 경로 |
 | `약 4분` | 구간 거리(`Data/RouteDistances.lua`)와 비행 속도로 계산한 **예상 시간**(분 단위) |
 | `1분 28초` (`약` 없음) | 그 경로를 실제로 날아서 **기록한 시간** |
+| `1분 28초 (공유)` | 다른 EzWoW 사용자가 그 경로를 날아서 기록한 시간(내가 아직 날지 않은 경로) |
 | `미측정` | 기록도, 계산용 거리 데이터도 없는 경로 |
 
 - 기본 설정에서는 조련사 대화창을 건너뛰고 바로 지도를 엽니다. **Shift**를 누른 채 말을 걸면 대화창이 나옵니다.
@@ -98,7 +99,7 @@ WoW Forever (`Interface: 16001`) · `/ezfl` · `/미니게임`
 
 ### 미니게임 (`/미니게임`, `/ezgames`)
 
-비행하는 동안 가볍게 즐길 수 있는 **지뢰찾기 · 짝 맞추기 · 퍼즐 맞추기 · 솔리테어**가 들어 있습니다.
+비행하는 동안 가볍게 즐길 수 있는 **지뢰찾기 · 짝 맞추기 · 퍼즐 맞추기 · 솔리테어 · 스도쿠**가 들어 있습니다.
 
 - 비행을 시작하면 미니게임 창이 자동으로 열리고, 착륙하면 닫힙니다. 게임을 하는 중이면 착륙해도 닫히지 않습니다.
 - 창 아래 **비행을 시작하면 자동으로 열기**를 끄면 자동으로 열리지 않습니다. 자동으로 열린 창을 비행 중에 직접 닫아도 이 설정이 꺼지고 채팅창에 안내가 나옵니다. 다시 켜려면 이 칸을 선택합니다.
@@ -184,6 +185,7 @@ When you talk to a flight master (gryphon, wyvern, bat or hippogryph), Flight Ma
 | `Free` / `Unknown` | Zero-cost route / fare not readable |
 | `~4m` | **Estimate** from route distance (`Data/RouteDistances.lua`) and flight speed, in whole minutes |
 | `1m 28s` (no `~`) | **Recorded** time from actually flying that route |
+| `1m 28s (shared)` | Time recorded by other EzWoW users on that route (one you have not flown yet) |
 | `Not recorded` | No recorded time and no distance data |
 
 - By default the gossip window is skipped and the map opens at once. Hold **Shift** while talking to see the gossip.
@@ -231,7 +233,7 @@ Click the **map button** at the bottom left under the map to change the look. Yo
 
 ### Mini games (`/ezgames`, `/미니게임`)
 
-**Minesweeper · Memory · Sliding Puzzle · Solitaire** to pass the time while flying.
+**Minesweeper · Memory · Sliding Puzzle · Solitaire · Sudoku** to pass the time while flying.
 
 - The mini games window opens by itself when a flight starts and closes on landing, unless a game is still being played.
 - Untick **Open when a flight starts** at the bottom of the window to stop this. Closing the window yourself while it is open on a flight also turns this off, with a note in chat; tick the box to turn it back on.

@@ -33,7 +33,7 @@ When you talk to a flight master (gryphon, wyvern, bat or hippogryph), a dedicat
 - Fares you cannot afford are shown in red.
 
 ### Flight times
-- Times with `~` are estimates from the route distance and flight speed. After you fly a route once, the real time is recorded and shown without `~`.
+- Times with `~` are estimates from the route distance and flight speed. After you fly a route once, the real time is recorded and shown without `~`. A time another EzWoW user flew on a route you have not flown yet shows `(shared)`.
 
 ### Flight timer bar
 - Time left, current leg (stop 1/2) and arrival time. A sound and a taskbar flash on arrival, and an optional alert a few seconds before landing.
@@ -41,7 +41,7 @@ When you talk to a flight master (gryphon, wyvern, bat or hippogryph), a dedicat
 - Drag to move. It carries on after a `/reload` or reconnect during the flight.
 
 ### Mini games
-- Minesweeper, Memory, Sliding Puzzle and Solitaire, with difficulty levels, best times and saved boards.
+- Minesweeper, Memory, Sliding Puzzle, Solitaire and Sudoku, with difficulty levels, best times and saved boards.
 - Opens when a flight starts and closes on landing. Close it during a flight (or untick the box at the bottom) and it stops opening by itself.
 - `/ezgames`, or the **Mini Games** button next to the timer bar. Resize by dragging the corner or with Ctrl + mouse wheel.
 
@@ -101,7 +101,7 @@ Languages: English, 한국어, Deutsch, Français, Español, Русский, 简
 - 소지금보다 비싼 요금은 빨간색입니다.
 
 ### 소요 시간
-- `약 4분`처럼 `약`이 붙은 시간은 구간 거리와 비행 속도로 계산한 예상 시간입니다. 한 번 날아가면 실제 시간이 기록되어 `약` 없이 표시됩니다.
+- `약 4분`처럼 `약`이 붙은 시간은 구간 거리와 비행 속도로 계산한 예상 시간입니다. 한 번 날아가면 실제 시간이 기록되어 `약` 없이 표시됩니다. 내가 아직 날지 않은 경로에서 다른 EzWoW 사용자가 기록한 시간에는 `(공유)`가 붙습니다.
 
 ### 남은 시간 막대
 - 남은 시간, 경유 구간(경유 1/2), 도착 예정 시각. 도착하면 소리와 작업 표시줄 깜빡임으로 알리고, 착륙 몇 초 전 알림도 켤 수 있습니다.
@@ -109,7 +109,7 @@ Languages: English, 한국어, Deutsch, Français, Español, Русский, 简
 - 끌어서 옮길 수 있고, 비행 중에 `/reload`하거나 다시 접속해도 이어서 표시됩니다.
 
 ### 미니게임
-- 지뢰찾기, 짝 맞추기, 퍼즐 맞추기, 솔리테어. 난이도 선택, 최고 기록, 진행 중인 판 저장.
+- 지뢰찾기, 짝 맞추기, 퍼즐 맞추기, 솔리테어, 스도쿠. 난이도 선택, 최고 기록, 진행 중인 판 저장.
 - 비행을 시작하면 열리고 착륙하면 닫힙니다. 비행 중에 창을 닫거나 창 아래 칸을 끄면 다음부터 자동으로 열지 않습니다.
 - `/미니게임` 또는 남은 시간 막대 옆 **미니게임** 버튼. 모서리를 끌거나 Ctrl + 마우스 휠로 크기 조절.
 

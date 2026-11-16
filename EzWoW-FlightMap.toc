@@ -42,6 +42,7 @@ Libs\EzWoWMiniGames\Games\Minesweeper.lua
 Libs\EzWoWMiniGames\Games\Memory.lua
 Libs\EzWoWMiniGames\Games\Puzzle.lua
 Libs\EzWoWMiniGames\Games\Solitaire.lua
+Libs\EzWoWMiniGames\Games\Sudoku.lua
 UI\FlightMapExtras.lua
 UI\FlightMapWindow.lua
 UI\LanguageDropdown.lua

@@ -12,7 +12,7 @@
 local ADDON_NAME, ns = ...
 local type, pairs, ipairs, tostring, pcall = type, pairs, ipairs, tostring, pcall
 
-local LIB_VERSION = 4
+local LIB_VERSION = 5
 local WINDOW_NAME = "EzWoWMiniGamesWindow"
 local previous = _G.EzWoW_MiniGames
 if type(previous) == "table" and (tonumber(previous.version) or 0) >= LIB_VERSION then return end
@@ -56,6 +56,7 @@ local STR = {
     koKR = {
         title = "미니게임", sub = "잠깐 쉬는 동안 가볍게 한 판",
         mines = "지뢰찾기", memory = "짝 맞추기", puzzle = "퍼즐 맞추기", solitaire = "솔리테어",
+        sudoku = "스도쿠", hard = "어려움", st_cells = "남은 칸 %d  ·  %s", erase = "지우기",
         new = "새 게임", easy = "쉬움", normal = "보통", draw1 = "1장 뽑기", draw3 = "3장 뽑기",
         st_mines = "남은 지뢰 %d  ·  %s", st_moves = "이동 %d  ·  %s", st_tries = "시도 %d  ·  %s",
         win = "성공! %s", newBest = "새 최고 기록! %s", lose = "펑! 지뢰를 밟았습니다. 새 게임을 눌러 보세요.",
@@ -66,12 +67,14 @@ local STR = {
         h_memory = "같은 그림 두 장을 찾으세요.",
         h_puzzle = "빈칸과 같은 줄의 조각을 누르면 밀립니다. 1부터 순서대로 맞추세요.",
         h_solitaire = "카드를 누른 뒤 옮길 곳을 누르세요 · 오른쪽 클릭: 모으기 칸으로",
+        h_sudoku = "칸을 누른 뒤 아래 숫자를 누르세요 · 오른쪽 클릭: 지우기",
         autoFinish = "자동 완료",
         resizeTip = "오른쪽 아래 모서리를 끌거나 Ctrl + 휠로 창 크기를 바꿉니다.",
     },
     enUS = {
         title = "Mini Games", sub = "A quick game while you wait",
         mines = "Minesweeper", memory = "Memory", puzzle = "Sliding Puzzle", solitaire = "Solitaire",
+        sudoku = "Sudoku", hard = "Hard", st_cells = "Cells left %d  ·  %s", erase = "Erase",
         new = "New game", easy = "Easy", normal = "Normal", draw1 = "Draw 1", draw3 = "Draw 3",
         st_mines = "Mines left %d  ·  %s", st_moves = "Moves %d  ·  %s", st_tries = "Tries %d  ·  %s",
         win = "Solved! %s", newBest = "New best! %s", lose = "Boom! Press New game to try again.",
@@ -82,12 +85,14 @@ local STR = {
         h_memory = "Find the pairs of matching pictures.",
         h_puzzle = "Click a tile in line with the gap to slide it. Put 1 to the end in order.",
         h_solitaire = "Click a card, then where it goes · Right-click: to the foundation",
+        h_sudoku = "Click a cell, then a number below · Right-click: erase",
         autoFinish = "Auto finish",
         resizeTip = "Drag the bottom-right corner or use Ctrl + wheel to resize.",
     },
     deDE = {
         title = "Minispiele", sub = "Ein schnelles Spiel zwischendurch",
         mines = "Minensuche", memory = "Memory", puzzle = "Schiebepuzzle", solitaire = "Solitär",
+        sudoku = "Sudoku", hard = "Schwer", st_cells = "Freie Felder %d  ·  %s", erase = "Löschen",
         new = "Neues Spiel", easy = "Leicht", normal = "Normal", draw1 = "1 ziehen", draw3 = "3 ziehen",
         st_mines = "Minen übrig %d  ·  %s", st_moves = "Züge %d  ·  %s", st_tries = "Versuche %d  ·  %s",
         win = "Geschafft! %s", newBest = "Neuer Rekord! %s", lose = "Bumm! Neues Spiel für einen neuen Versuch.",
@@ -97,12 +102,14 @@ local STR = {
         h_memory = "Finde die Paare gleicher Bilder.",
         h_puzzle = "Ein Teil in einer Linie mit der Lücke anklicken. 1 bis Ende ordnen.",
         h_solitaire = "Karte anklicken, dann das Ziel · Rechtsklick: auf die Ablage",
+        h_sudoku = "Feld anklicken, dann eine Zahl darunter · Rechtsklick: löschen",
         autoFinish = "Automatisch beenden",
         resizeTip = "Untere rechte Ecke ziehen oder Strg + Mausrad zum Ändern der Größe.",
     },
     frFR = {
         title = "Mini-jeux", sub = "Une petite partie en attendant",
         mines = "Démineur", memory = "Mémoire", puzzle = "Taquin", solitaire = "Solitaire",
+        sudoku = "Sudoku", hard = "Difficile", st_cells = "Cases vides %d  ·  %s", erase = "Effacer",
         new = "Nouvelle partie", easy = "Facile", normal = "Normal", draw1 = "Piocher 1", draw3 = "Piocher 3",
         st_mines = "Mines restantes %d  ·  %s", st_moves = "Coups %d  ·  %s", st_tries = "Essais %d  ·  %s",
         win = "Réussi ! %s", newBest = "Nouveau record ! %s", lose = "Boum ! Nouvelle partie pour réessayer.",
@@ -112,12 +119,14 @@ local STR = {
         h_memory = "Trouvez les paires d'images identiques.",
         h_puzzle = "Cliquez une pièce alignée avec la case vide. Remettez-les dans l'ordre.",
         h_solitaire = "Cliquez une carte, puis sa destination · Clic droit : vers les fondations",
+        h_sudoku = "Cliquez une case, puis un chiffre en dessous · Clic droit : effacer",
         autoFinish = "Finir automatiquement",
         resizeTip = "Glissez le coin inférieur droit ou Ctrl + molette pour redimensionner.",
     },
     esES = {
         title = "Minijuegos", sub = "Una partida rápida mientras esperas",
         mines = "Buscaminas", memory = "Memoria", puzzle = "Puzle deslizante", solitaire = "Solitario",
+        sudoku = "Sudoku", hard = "Difícil", st_cells = "Casillas vacías %d  ·  %s", erase = "Borrar",
         new = "Nueva partida", easy = "Fácil", normal = "Normal", draw1 = "Robar 1", draw3 = "Robar 3",
         st_mines = "Minas %d  ·  %s", st_moves = "Movimientos %d  ·  %s", st_tries = "Intentos %d  ·  %s",
         win = "¡Resuelto! %s", newBest = "¡Nuevo récord! %s", lose = "¡Bum! Pulsa Nueva partida para reintentar.",
@@ -127,12 +136,14 @@ local STR = {
         h_memory = "Encuentra las parejas de imágenes iguales.",
         h_puzzle = "Pulsa una pieza alineada con el hueco. Ordénalas del 1 al final.",
         h_solitaire = "Pulsa una carta y luego su destino · Clic derecho: a la base",
+        h_sudoku = "Pulsa una casilla y luego un número · Clic derecho: borrar",
         autoFinish = "Terminar solo",
         resizeTip = "Arrastra la esquina inferior derecha o usa Ctrl + rueda para cambiar el tamaño.",
     },
     ruRU = {
         title = "Мини-игры", sub = "Быстрая партия, пока ждёте",
         mines = "Сапёр", memory = "Пары", puzzle = "Пятнашки", solitaire = "Пасьянс",
+        sudoku = "Судоку", hard = "Сложно", st_cells = "Пустых клеток %d  ·  %s", erase = "Стереть",
         new = "Новая игра", easy = "Легко", normal = "Средне", draw1 = "По 1", draw3 = "По 3",
         st_mines = "Мин осталось %d  ·  %s", st_moves = "Ходы %d  ·  %s", st_tries = "Попытки %d  ·  %s",
         win = "Готово! %s", newBest = "Новый рекорд! %s", lose = "Бум! Нажмите «Новая игра».",
@@ -142,12 +153,14 @@ local STR = {
         h_memory = "Найдите пары одинаковых картинок.",
         h_puzzle = "Нажмите плитку в одной линии с пустой клеткой. Расставьте по порядку.",
         h_solitaire = "Нажмите карту, затем место · ПКМ: в базу",
+        h_sudoku = "Нажмите клетку, затем цифру внизу · ПКМ: стереть",
         autoFinish = "Доиграть",
         resizeTip = "Тяните правый нижний угол или Ctrl + колесо, чтобы изменить размер.",
     },
     zhCN = {
         title = "小游戏", sub = "等待时轻松玩一局",
         mines = "扫雷", memory = "翻牌配对", puzzle = "数字华容道", solitaire = "纸牌接龙",
+        sudoku = "数独", hard = "困难", st_cells = "剩余空格 %d  ·  %s", erase = "清除",
         new = "新游戏", easy = "简单", normal = "普通", draw1 = "每次 1 张", draw3 = "每次 3 张",
         st_mines = "剩余地雷 %d  ·  %s", st_moves = "移动 %d  ·  %s", st_tries = "尝试 %d  ·  %s",
         win = "完成！%s", newBest = "新纪录！%s", lose = "砰！点击新游戏再试一次。",
@@ -157,12 +170,14 @@ local STR = {
         h_memory = "找出相同图案的两张牌。",
         h_puzzle = "点击与空格同一行或列的方块即可滑动，按顺序排好。",
         h_solitaire = "先点卡牌，再点目标位置 · 右键：移到收牌区",
+        h_sudoku = "先点格子，再点下方数字 · 右键：清除",
         autoFinish = "自动完成",
         resizeTip = "拖动右下角或按住 Ctrl 滚动滚轮调整窗口大小。",
     },
     zhTW = {
         title = "小遊戲", sub = "等待時輕鬆玩一局",
         mines = "踩地雷", memory = "翻牌配對", puzzle = "數字推盤", solitaire = "接龍",
+        sudoku = "數獨", hard = "困難", st_cells = "剩餘空格 %d  ·  %s", erase = "清除",
         new = "新遊戲", easy = "簡單", normal = "普通", draw1 = "每次 1 張", draw3 = "每次 3 張",
         st_mines = "剩餘地雷 %d  ·  %s", st_moves = "移動 %d  ·  %s", st_tries = "嘗試 %d  ·  %s",
         win = "完成！%s", newBest = "新紀錄！%s", lose = "砰！點擊新遊戲再試一次。",
@@ -172,6 +187,7 @@ local STR = {
         h_memory = "找出相同圖案的兩張牌。",
         h_puzzle = "點擊與空格同一行或列的方塊即可滑動，依序排好。",
         h_solitaire = "先點卡牌，再點目標位置 · 右鍵：移到收牌區",
+        h_sudoku = "先點格子，再點下方數字 · 右鍵：清除",
         autoFinish = "自動完成",
         resizeTip = "拖曳右下角或按住 Ctrl 滾動滾輪調整視窗大小。",
     },
@@ -199,6 +215,24 @@ local function rgba(c) return c[1], c[2], c[3], c[4] or 1 end
 local BACKDROP = { bgFile = WHITE, edgeFile = WHITE, edgeSize = 1, insets = { left = 1, right = 1, top = 1, bottom = 1 } }
 MiniGames.BACKDROP = BACKDROP
 
+-- a label wider than its button (long names in some languages) gets a
+-- smaller font, down to 8
+local function fitLabel(b)
+    local label = b.label
+    if not b.labelFont then
+        local font, size, flags = label:GetFont()
+        if not (font and size) then return end
+        b.labelFont = { font, size, flags or "" }
+    end
+    local font, size, flags = b.labelFont[1], b.labelFont[2], b.labelFont[3]
+    label:SetFont(font, size, flags)
+    local room = b:GetWidth() - 8
+    while size > 8 and (label:GetStringWidth() or 0) > room do
+        size = size - 1
+        label:SetFont(font, size, flags)
+    end
+end
+
 function MiniGames.Button(parent, w, h, text)
     local b = CreateFrame("Button", nil, parent, "BackdropTemplate")
     b:SetSize(w, h)
@@ -219,7 +253,10 @@ function MiniGames.Button(parent, w, h, text)
         end
     end
     function b:SetActive(v) self.active = v and true or false self:Paint() end
-    function b:SetLabel(t) self.label:SetText(t or "") end
+    function b:SetLabel(t)
+        self.label:SetText(t or "")
+        fitLabel(self)
+    end
     b:SetScript("OnEnter", function(self) self.hover = true self:Paint() end)
     b:SetScript("OnLeave", function(self) self.hover = false self:Paint() end)
     b:SetLabel(text)
@@ -528,16 +565,21 @@ local function build()
     close:SetScript("OnClick", function() win:Hide() end)
 
     win.tabs = {}
+    local tabW = math.floor((AREA_W - 4 * (#MiniGames.order - 1)) / math.max(1, #MiniGames.order))
     for i, key in ipairs(MiniGames.order) do
-        local tab = MiniGames.Button(win, 106, 26, "")
-        tab:SetPoint("TOPLEFT", 12 + (i - 1) * 110, -66)
+        local tab = MiniGames.Button(win, tabW, 26, "")
+        tab:SetPoint("TOPLEFT", 12 + (i - 1) * (tabW + 4), -66)
         tab.key = key
         tab:SetScript("OnClick", function(self) selectGame(self.key) end)
         win.tabs[i] = tab
     end
 
     win.levelChips = {}
-    for i = 1, 2 do
+    local chipCount = 2
+    for _, key in ipairs(MiniGames.order) do
+        chipCount = math.max(chipCount, #MiniGames.games[key].levels)
+    end
+    for i = 1, chipCount do
         local chip = MiniGames.Button(win, 90, 24, "")
         chip:SetPoint("TOPLEFT", 12 + (i - 1) * 94, -100)
         chip:SetScript("OnClick", function(self)

@@ -222,6 +222,9 @@ end
 function EzWoWFlightMapPinMixin:OnMouseEnter()
     local n = self.node
     if not n then return end
+    -- the hovered node (and its label) comes to the front of nodes that overlap it
+    if self.ezBaseLevel == nil then self.ezBaseLevel = self:GetFrameLevel() end
+    self:SetFrameLevel(self.ezBaseLevel + 500)
     local resolvedValue = WorldMapPinProvider.resolveText()
     local windowFrame = WorldMapPinProvider.resolveFactionInfo(n.faction)
     GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
@@ -240,6 +243,10 @@ function EzWoWFlightMapPinMixin:OnMouseEnter()
     if _G.EzWoWTooltipTagSizer and _G.EzWoWTooltipTagSizer.Refit then pcall(_G.EzWoWTooltipTagSizer.Refit, GameTooltip) end
 end
 function EzWoWFlightMapPinMixin:OnMouseLeave()
+    if self.ezBaseLevel ~= nil then
+        self:SetFrameLevel(self.ezBaseLevel)
+        self.ezBaseLevel = nil
+    end
     if GameTooltip:IsOwned(self) then GameTooltip:Hide() end
 end
 function EzWoWFlightMapPinMixin:OnReleased()

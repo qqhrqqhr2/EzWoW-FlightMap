@@ -62,6 +62,13 @@ local destinationListPanel, paintList, syncListSelection
 local locationPulseFrame
 local preAlpha = ns.preAlpha
 
+-- a recorded time other players flew (shared records), not this character:
+-- a short muted mark after the time ("" for this character's own times)
+function FlightMapWindow.sharedTimeMark(shared)
+    if not shared then return "" end
+    return " |cff9aa7b4" .. (L.TIME_SHARED or "(shared)") .. "|r"
+end
+
 local flightMapArtProbe
 function FlightMapWindow.readDefaultFlightArtwork()
     local boxWidth, headerBar = TAXI_MAP_WIDTH or 316, TAXI_MAP_HEIGHT or 352
@@ -407,9 +414,9 @@ function FlightMapWindow.pinOnenter(self)
         GameTooltip:AddLine(resolveFareText(node, 12), 1, 1, 1)
         if tooExpensive(node) then GameTooltip:AddLine(L.NO_MONEY, STYLE.warning[1], STYLE.warning[2], STYLE.warning[3]) end
         if hasRecent(node) then GameTooltip:AddLine(L.TT_RECENT, 0.55, 0.8, 1) end
-        local sec, recorded = estimateFlightDuration(node)
+        local sec, recorded, shared = estimateFlightDuration(node)
         if sec then
-            if recorded then GameTooltip:AddLine(L.TT_TIME:format(composeTime(sec)), 1, 1, 1)
+            if recorded then GameTooltip:AddLine(L.TT_TIME:format(composeTime(sec)) .. FlightMapWindow.sharedTimeMark(shared), 1, 1, 1)
             else
                 GameTooltip:AddLine(L.TT_EST:format(composeTime(sec, true)), 0.86, 0.84, 0.75)
                 GameTooltip:AddLine(L.TT_EST_NOTE, 0.6, 0.6, 0.6)
@@ -485,8 +492,9 @@ function FlightMapWindow.canFly(node)
         and (not TaxiNodeName or TaxiNodeName(node.slot)==node.name)
 end
 function FlightMapWindow.confirmDetails(node,fare)
-    local sec,recorded=estimateFlightDuration(node)
-    return node.name .. "\n\n" .. resolveCoinText(fare,12) .. "   " .. L.TIME .. " " .. (sec and composeTime(sec,not recorded) or L.TIME_UNKNOWN)
+    local sec,recorded,shared=estimateFlightDuration(node)
+    return node.name .. "\n\n" .. resolveCoinText(fare,12) .. "   " .. L.TIME .. " "
+        .. (sec and (composeTime(sec,not recorded) .. FlightMapWindow.sharedTimeMark(recorded and shared)) or L.TIME_UNKNOWN)
 end
 function FlightMapWindow.presentFlightConfirm(node)
     if not flightConfirmDialog then
@@ -1178,9 +1186,9 @@ function FlightMapWindow.fillRow(rowWidget, node)
     rowWidget.star.icon:SetTexture(FlightMapWindow.hasFavorite(node) and STAR_ON_FILE or STAR_OFF_FILE)
     rowWidget.star.icon:SetAlpha(FlightMapWindow.hasFavorite(node) and 1 or 0.45)
     if node.type == "REACHABLE" then
-        local sec, recorded = estimateFlightDuration(node)
+        local sec, recorded, shared = estimateFlightDuration(node)
         rowWidget.name:SetTextColor(STYLE.accent[1], STYLE.accent[2], STYLE.accent[3])
-        rowWidget.time:SetText(sec and composeTime(sec, not recorded) or L.TIME_UNKNOWN)
+        rowWidget.time:SetText(sec and (composeTime(sec, not recorded) .. FlightMapWindow.sharedTimeMark(recorded and shared)) or L.TIME_UNKNOWN)
         rowWidget.time:SetTextColor(recorded and 1 or STYLE.textMuted[1], recorded and 0.94 or STYLE.textMuted[2], recorded and 0.72 or STYLE.textMuted[3])
         rowWidget.fare:SetText(resolveFareText(node, 11))
     else

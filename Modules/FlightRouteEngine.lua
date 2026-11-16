@@ -413,6 +413,34 @@ end
 -- point names seen here turn into a node key is kept as that.
 -- A time this character flew itself is always used first.
 -----------------------------------------------------------------------------
+-- received times that stand for a route this character has not flown: the
+-- same order as estimateFlightDuration reads them (node key first)
+function FlightRouteEngine.countUsedSharedTimes()
+    local store = ns.Share and type(ns.Share.Store) == "function" and ns.Share.Store("T")
+    if type(store) ~= "table" then return 0 end
+    local db = type(ns.DB) == "table" and ns.DB or {}
+    local times = type(db.times) == "table" and db.times or {}
+    local nodeTimes = type(db.nodeTimes) == "table" and db.nodeTimes or {}
+    local idByName
+    local n = 0
+    for key, secs in pairs(store) do
+        secs = tonumber(secs)
+        if type(key) == "string" and secs and secs >= 5 and secs <= 3600 then
+            local inUse
+            if FlightRouteEngine.isNodeKey(key) then
+                inUse = not nodeTimes[key]
+            elseif not times[key] then
+                idByName = idByName or FlightRouteEngine.idByNodeName()
+                local nodeKey = FlightRouteEngine.nodeKeyFromNames(key, idByName)
+                -- the same route under its node key: that time is the one used
+                inUse = not (nodeKey and (nodeTimes[nodeKey] or store[nodeKey]))
+            end
+            if inUse then n = n + 1 end
+        end
+    end
+    return n
+end
+
 if ns.Share and ns.Share.RegisterKind then
     ns.Share.RegisterKind("T", {
         own = function()
@@ -475,9 +503,16 @@ if ns.Share and ns.Share.RegisterKind then
             secs = tonumber(secs) or 0
             return string.format("%s · %d:%02d", table.concat(stops, " > "), math.floor(secs / 60), secs % 60)
         end,
+        -- the shared records window: received times in use now (a route this
+        -- character has flown itself uses its own time)
+        used = function()
+            return FlightRouteEngine.countUsedSharedTimes()
+        end,
     })
 end
 
+-- seconds, recorded (a real flight, not worked out from the distance), shared
+-- (the recorded time came from other players, not from this character's flights)
 function FlightRouteEngine.estimateFlightDuration(recordEntry)
     if not (ns.snap and ns.snap.current and recordEntry) then return end
     local nodeKey = recordEntry.nodeKey
@@ -494,7 +529,7 @@ function FlightRouteEngine.estimateFlightDuration(recordEntry)
         local seed = ns.Share and type(ns.Share.Seed) == "function" and ns.Share.Seed("flightTimes")
         shared = seed and ((nodeKey and seed[nodeKey]) or (recordEntry.timeKey and seed[recordEntry.timeKey]))
     end
-    if usable(shared) then return shared, true end
+    if usable(shared) then return shared, true, true end
     if resolveFiniteNumber(recordEntry.dist) and recordEntry.dist > 0 then
         local speed = ns.DB.flightSpeeds[ns.snap.speedKey]
         if not resolveFiniteNumber(speed) or speed < 8 or speed > 120 then speed = 30.4 end
