@@ -137,7 +137,7 @@ local SETTINGS = {
     { kind = "check",  key = "pulse",             label = "OPT_PULSE" },
     { kind = "check",  key = "worldArt",          label = "OPT_WORLDART" },
     { kind = "check",  key = "zoneNames",         label = "OPT_ZONENAMES" },
-    { kind = "check",  key = "questMarks",        label = "OPT_QUESTMARKS" },
+    { kind = "check",  key = "questMarks",        label = "OPT_QUESTMARKS", need = "HasQuestTurnInData", needNote = "OPT_QUESTMARKS_NEED" },
     { kind = "check",  key = "dungeonMarks",      label = "OPT_DUNGEONMARKS" },
     { kind = "check",  key = "autoSearch",        label = "OPT_AUTOSEARCH", sub = "OPT_AUTOSEARCH_SUB" },
     { kind = "slider", key = "scale",     label = "OPT_SCALE", min = 50, max = 120, step = 5, fmt = "%d%%" },
@@ -305,6 +305,8 @@ function SettingsDialog.assembleSettings(parent, x, y, width)
                 y = y - 12
             end
             checkWidget.optKey = optionEntry.key
+            -- (an option that needs another addon's data: greyed out without it)
+            checkWidget.needFn, checkWidget.needNote = optionEntry.need, optionEntry.needNote
             checkWidget:SetScript("OnClick", function(self)
                 SettingsDialog.assignOpt(self.optKey, self:GetChecked() and true or false)
             end)
@@ -317,6 +319,9 @@ function SettingsDialog.assembleSettings(parent, x, y, width)
                 local tipWidget = (hasKo and FLIGHT_TIPS_KO[self.optKey]) or (otherTips and otherTips[self.optKey]) or FLIGHT_TIPS_EN[self.optKey] or (self.subFS and self.subFS:GetText())
                 if tipWidget and tipWidget ~= "" then
                     GameTooltip:AddLine(tipWidget, 0.85, 0.90, 0.94, true)
+                end
+                if self.needNote and not self:IsEnabled() then
+                    GameTooltip:AddLine(L[self.needNote], 1, 0.45, 0.4, true)
                 end
                 GameTooltip:Show()
             end)
@@ -419,6 +424,17 @@ function SettingsDialog.assembleSettings(parent, x, y, width)
                     themeColor.updating = false
                 else
                     themeColor:SetChecked(v)
+                    if themeColor.needFn then
+                        local check = ns[themeColor.needFn]
+                        local okNeed, has = true, true
+                        if type(check) == "function" then okNeed, has = pcall(check) end
+                        local usable = okNeed and has == true
+                        themeColor:SetEnabled(usable)
+                        if themeColor.labelFS then
+                            local c = usable and 1 or 0.5
+                            themeColor.labelFS:SetTextColor(c, c, c)
+                        end
+                    end
                 end
             end
         end

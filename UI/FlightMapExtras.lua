@@ -352,17 +352,45 @@ end
 -----------------------------------------------------------------------------
 -- Turn-in spots ({ "npc"/"object", id, continent, worldX, worldY }) come from
 -- the shared EzWoW - Data quest map when another addon already loaded it,
--- else from EzWoW - Map Finder's quest table. Nothing is loaded from here.
+-- and from EzWoW - Map Finder's quest table. Without Map Finder (Flight Map
+-- works alone) the EzWoW - Data quest map is loaded from here.
+local function mapFinderTurnIns()
+    local mf = _G.EzWoWMapFinderQuestData
+    return type(mf) == "table" and type(mf.turnIns) == "table" and mf.turnIns or nil
+end
+
 local function turnInTables()
     local out = {}
+    local own = mapFinderTurnIns()
     local D = _G.EzWoW_Data
     if type(D) == "table" and D.formatVersion == 2 and type(D.Peek) == "function" then
         local ok, t = pcall(D.Peek, "QuestMap", "turnIns")
+        if not (ok and type(t) == "table") and not own and type(D.Load) == "function" then
+            -- (out of combat the module loads right away; in combat the load
+            -- waits and the next drawing finds it)
+            pcall(D.Load, "QuestMap")
+            ok, t = pcall(D.Peek, "QuestMap", "turnIns")
+        end
         if ok and type(t) == "table" then out[#out + 1] = t end
     end
-    local mf = _G.EzWoWMapFinderQuestData
-    if type(mf) == "table" and type(mf.turnIns) == "table" then out[#out + 1] = mf.turnIns end
+    if own then out[#out + 1] = own end
     return out
+end
+
+-- the quest turn-in option has data to show (the settings grey it out otherwise)
+function ns.HasQuestTurnInData()
+    if mapFinderTurnIns() then return true end
+    local D = _G.EzWoW_Data
+    if type(D) ~= "table" or D.formatVersion ~= 2 then return false end
+    if type(D.Peek) == "function" then
+        local ok, t = pcall(D.Peek, "QuestMap", "turnIns")
+        if ok and type(t) == "table" then return true end
+    end
+    if type(D.CanLoad) == "function" then
+        local ok, can = pcall(D.CanLoad, "QuestMap")
+        return ok and can == true
+    end
+    return false
 end
 
 local function worldToContinent(cont, wx, wy, continentID)
