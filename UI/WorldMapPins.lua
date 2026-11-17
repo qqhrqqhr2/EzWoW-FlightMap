@@ -15,6 +15,20 @@ local function panelText(code, ko, en, others)
 end
 local type, pairs, ipairs, tonumber, tostring, select, pcall = type, pairs, ipairs, tonumber, tostring, select, pcall
 
+-- With the gamepad UI on, the pins are made outside the map's pin pools: the map runs the
+-- mouse code of the pins near its gamepad cursor itself, and addon code there taints its
+-- gamepad steps (Libs/EzWoWGamePad: AcquireMapPin / RemoveMapPins)
+local function acquirePin(map, template, ...)
+    local pad = ns.GamePad
+    if pad and pad.AcquireMapPin then return pad.AcquireMapPin(map, template, ...) end
+    return map:AcquirePin(template, ...)
+end
+local function removePins(map, template)
+    local pad = ns.GamePad
+    if pad and pad.RemoveMapPins then return pad.RemoveMapPins(map, template) end
+    map:RemoveAllPinsByTemplate(template)
+end
+
 local WorldMapPinProvider = ns.WorldMapPinProvider or {}
 ns.WorldMapPinProvider = WorldMapPinProvider
 local PIN = "EzWoWFlightMapPinTemplate"
@@ -693,14 +707,14 @@ function WorldMapPinProvider.installWorldMapPinProvider()
     WorldMapDataProvider = CreateFromMixins(MapCanvasDataProviderMixin)
     WorldMapDataProvider.Collect = WorldMapPinProvider.collectMatchingEntries
     function WorldMapDataProvider:RemoveAllData()
-        self:GetMap():RemoveAllPinsByTemplate(PIN)
+        removePins(self:GetMap(), PIN)
     end
     function WorldMapDataProvider:RefreshAllData()
         self:RemoveAllData()
         if not WorldMapPinProvider.isFeatureEnabled() then return end
         for _, entry in ipairs(WorldMapPinProvider.collectMatchingEntries(self:GetMap():GetMapID())) do
             if WorldMapPinProvider.presentFaction(entry.node.faction) then
-                self:GetMap():AcquirePin(PIN, entry)
+                acquirePin(self:GetMap(), PIN, entry)
             end
         end
     end

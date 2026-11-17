@@ -39,7 +39,7 @@ local ADDON_NAME, ns = ...
 local type, pairs, ipairs, tonumber, tostring, pcall, next = type, pairs, ipairs, tonumber, tostring, pcall, next
 local floor, format, concat, max, min = math.floor, string.format, table.concat, math.max, math.min
 
-local LIB_VERSION = 15
+local LIB_VERSION = 16
 
 -- one table for every copy (a newer copy updates the functions in it)
 local lib = _G.EzWoW_Share
@@ -91,7 +91,9 @@ local TEXTS = {
         off = "Data sharing is off. Nothing is sent or received.",
         channelOn = "The shared data channel is used.",
         channelOff = "Only the party, raid and guild are used (no channel).",
-        help = "/ezshare (window) | on | off | channel on | channel off | status | roster | ping [name]",
+        tipLinesOn = "Tooltips show the shared lines (sold by, drops, rare sightings).",
+        tipLinesOff = "Tooltips do not show the shared lines (sold by, drops, rare sightings).",
+        help = "/ezshare (window) | on | off | channel on | channel off | tooltip on | tooltip off | status | roster | ping [name]",
         status = "Records: quests %d, rare sightings %d, drop sources %d, gathering spots %d.",
         applied = "Of these, received from other players and in use: quests %d, rare sightings %d, drop sources %d, gathering spots %d.",
         traffic = "This session: %d records received from %d players, %d messages sent.",
@@ -159,6 +161,7 @@ local TEXTS = {
         sumLast = "Last send: %s",
         btnShareOn = "Sharing: on", btnShareOff = "Sharing: off",
         btnChannelOn = "Channel: used", btnChannelOff = "Channel: not used", btnClear = "Clear log",
+        btnTipOn = "Tooltip lines: on", btnTipOff = "Tooltip lines: off",
         btnViewAll = "Show: every message", btnViewNew = "Show: new only",
         logSince = "Log since %s", emptyList = "Nothing yet.",
         tipNoDetail = "Details are kept for the newest %d messages only.",
@@ -172,7 +175,7 @@ local TEXTS = {
         -- record numbers and versions
         syncLine = "Records in step: mine %d (numbered up to %d), players %d (all taken %d), taking from %d, waiting %d, giving to %d.",
         syncShort = "taking from %d, waiting %d, giving to %d",
-        versions = "Versions heard this session: %s", verOld = "v12 or older", colVersion = "Version",
+        versions = "Versions heard this session: %s", verOld = "v12 or older", verNew = "v13+", colVersion = "Version",
         tipVersion = "Sharing version %s", tipAddons = "Addons: %s", tipTaken = "Records taken: up to %d of %d",
         kindY = "Records (in order)",
     },
@@ -181,7 +184,9 @@ local TEXTS = {
         off = "데이터 공유를 껐습니다. 보내지도 받지도 않습니다.",
         channelOn = "공유 데이터 채널을 씁니다.",
         channelOff = "파티·공격대·길드로만 공유합니다(채널 안 씀).",
-        help = "/ezshare (창 열기) | on | off | channel on | channel off | status | roster | ping [이름]  (/공유)",
+        tipLinesOn = "툴팁에 공유 기록 줄(판매·드롭·희귀 목격)을 보여 줍니다.",
+        tipLinesOff = "툴팁에 공유 기록 줄(판매·드롭·희귀 목격)을 보여 주지 않습니다.",
+        help = "/ezshare (창 열기) | on | off | channel on | channel off | tooltip on | tooltip off | status | roster | ping [이름]  (/공유, /공유 툴팁 켜기·끄기)",
         status = "기록: 퀘스트 %d, 희귀 몬스터 목격 %d, 드롭 출처 %d, 채집 위치 %d.",
         applied = "그중 다른 사람에게 받아 쓰고 있는 것: 퀘스트 %d, 희귀 몬스터 목격 %d, 드롭 출처 %d, 채집 위치 %d.",
         traffic = "이번 접속: 받은 기록 %d개 (보낸 사람 %d명), 보낸 메시지 %d개.",
@@ -249,6 +254,7 @@ local TEXTS = {
         sumLast = "마지막 보내기: %s",
         btnShareOn = "공유: 켜짐", btnShareOff = "공유: 꺼짐",
         btnChannelOn = "채널: 씀", btnChannelOff = "채널: 안 씀", btnClear = "기록 지우기",
+        btnTipOn = "툴팁 줄: 보임", btnTipOff = "툴팁 줄: 숨김",
         btnViewAll = "보기: 모든 메시지", btnViewNew = "보기: 새 기록만",
         logSince = "%s부터 기록", emptyList = "아직 없습니다.",
         tipNoDetail = "자세한 내용은 최근 메시지 %d개만 남습니다.",
@@ -262,7 +268,7 @@ local TEXTS = {
         -- 기록 번호와 버전
         syncLine = "기록 맞추기: 내 기록 %d개 (번호 %d까지), 상대 %d명 (다 받음 %d명), 받는 중 %d명, 받을 차례 %d명, 보내는 중 %d명.",
         syncShort = "받는 중 %d명, 받을 차례 %d명, 보내는 중 %d명",
-        versions = "이번 접속에 본 버전: %s", verOld = "v12 이하", colVersion = "버전",
+        versions = "이번 접속에 본 버전: %s", verOld = "v12 이하", verNew = "v13 이상", colVersion = "버전",
         tipVersion = "공유 버전 %s", tipAddons = "애드온: %s", tipTaken = "받은 기록: 번호 %d까지 (상대 %d까지)",
         kindY = "기록 (번호 순서)",
     },
@@ -295,6 +301,14 @@ local function T(key)
     return set[key] or TEXTS.enUS[key] or key
 end
 lib.Text = T
+
+-- a player's sharing version as shown ("12": that version or older, "13+":
+-- records came before the player's hello)
+local function verText(v)
+    if v == "12" then return T("verOld") end
+    if v == "13+" then return T("verNew") end
+    return "v" .. tostring(v)
+end
 
 local function say(text)
     if DEFAULT_CHAT_FRAME and not (InCombatLockdown and InCombatLockdown()) then
@@ -516,7 +530,28 @@ local function settings() return lib.Data().settings end
 
 function lib.IsEnabled() return settings().off ~= true end
 function lib.UsesChannel() return lib.IsEnabled() and settings().noChannel ~= true end
-function lib.ShowsTooltips() return settings().noTooltip ~= true end
+
+-- Tooltip lines (item sources, rare sightings) come only with an EzWoW addon
+-- about items (or rares): an addon that only carries this library for the
+-- shared data (Frame Mover, Unit Frames...) adds nothing to tooltips. The
+-- player can turn the lines off (/ezshare tooltip off, the window button).
+local ITEM_TIP_HOSTS = { "EzWoW-Tooltip", "EzWoW-MapFinder", "EzWoW-BestGearFinder",
+    "EzWoW-ProfessionRecipes", "EzWoW-Bags", "EzWoW-Quest" }
+local UNIT_TIP_HOSTS = { "EzWoW-Tooltip", "EzWoW-MapFinder" }
+local function tipHostLoaded(list)
+    for _, name in ipairs(list) do
+        if lib.hosts[name] then return true end
+    end
+    return false
+end
+-- the player's choice only
+function lib.TooltipLinesOn() return settings().noTooltip ~= true end
+function lib.SetTooltipLines(on) settings().noTooltip = not on or nil end
+-- kind "unit": rare sightings on unit tooltips; else item tooltip lines
+function lib.ShowsTooltips(kind)
+    if not lib.TooltipLinesOn() then return false end
+    return tipHostLoaded(kind == "unit" and UNIT_TIP_HOSTS or ITEM_TIP_HOSTS)
+end
 
 -- The quest addon keeps reading its own saved table (ns.DB.questEnders ...):
 -- those keys are moved here and read through this table.
@@ -2887,12 +2922,14 @@ local function setupActivity()
 
     -- the sharing version a player has (and the EzWoW addons it told);
     -- weak: only noted when no newer version was heard from that player
+    -- ("13+": numbered records came before the player's hello, which tells the
+    -- exact version; they prove a version over 12)
     function activity.version(sender, ver, addons, weak)
         local p = person(data(), sender)
         if not p then return end
         ver = tostring(ver or "")
         if ver == "" then return end
-        if weak and p.ver and p.ver ~= ver then return end
+        if weak and p.ver and p.ver ~= ver and not (ver == "13+" and p.ver == "12") then return end
         p.ver = ver
         if type(addons) == "string" and addons ~= "" then p.addons = addons end
         p.verAt = now()
@@ -3416,6 +3453,7 @@ do
         -- server): anyone else asks by whisper
         local far = roster.left[key] == "faction" or roster.left[key] == "server"
         if way == "CHANNEL" and not far then return end
+        if activity.version then pcall(activity.version, sender, "13+", nil, true) end
         local q = S.serve[sender]
         if not q then
             local n = 0
@@ -3437,6 +3475,7 @@ do
         -- by whisper only as the answer to an ask
         if way == "WHISPER" and not (S.asking[id] or S.queue[id]) then return end
         local key = seen(sender, way, true)
+        if activity.version then pcall(activity.version, sender, "13+", nil, true) end
         local p = peer(id, sender)
         if to > p.l then p.l = to end
         -- the owner is answering (on the channel maybe for others first): no new ask
@@ -4286,9 +4325,17 @@ function lib.Slash(msg)
     elseif msg == "channel off" then
         lib.SetEnabled(lib.IsEnabled(), false)
         say(T("channelOff"))
+    elseif msg == "tooltip" or msg == "tooltip on" or msg == "tooltip off"
+        or msg == "툴팁" or msg == "툴팁 켜기" or msg == "툴팁 끄기" then
+        local on = not lib.TooltipLinesOn()
+        if msg == "tooltip on" or msg == "툴팁 켜기" then on = true
+        elseif msg == "tooltip off" or msg == "툴팁 끄기" then on = false end
+        lib.SetTooltipLines(on)
+        say(on and T("tipLinesOn") or T("tipLinesOff"))
     elseif msg == "status" then
         say(lib.IsEnabled() and T("on") or T("off"))
         if lib.IsEnabled() then say(lib.UsesChannel() and T("channelOn") or T("channelOff")) end
+        say(lib.TooltipLinesOn() and T("tipLinesOn") or T("tipLinesOff"))
         say(format(T("status"), counts()))
         say(format(T("applied"), counts(true)))
         local stats = lib.stats
@@ -4317,7 +4364,7 @@ function lib.Slash(msg)
             end
         end
         parts = {}
-        for ver, n in pairs(byVer) do parts[#parts + 1] = (ver == "12" and T("verOld") or ("v" .. ver)) .. " " .. n end
+        for ver, n in pairs(byVer) do parts[#parts + 1] = verText(ver) .. " " .. n end
         table.sort(parts)
         say(format(T("versions"), #parts > 0 and concat(parts, ", ") or "-"))
     elseif msg == "roster" then
@@ -4675,7 +4722,7 @@ local function setupWindow()
     function tips.people(tip, p)
         tip:AddLine(tostring(p.name or "?"), ACCENT[1], ACCENT[2], ACCENT[3])
         if p.ver then
-            tip:AddLine(format(T("tipVersion"), p.ver == "12" and T("verOld") or ("v" .. tostring(p.ver))), BODY[1], BODY[2], BODY[3])
+            tip:AddLine(format(T("tipVersion"), verText(p.ver)), BODY[1], BODY[2], BODY[3])
         end
         if type(p.addons) == "string" and p.addons ~= "" then
             -- "MF2.0.30" -> "MapFinder 2.0.30"
@@ -4779,7 +4826,7 @@ local function setupWindow()
             if (tonumber(p.held) or 0) > 0 then state[#state + 1] = format(T("stateHeld"), p.held) end
             local last = max(tonumber(p.last) or 0, tonumber(p.whisperedAt) or 0)
             local name = tostring(p.name or (m and m.name) or key)
-            local ver = p.ver and (p.ver == "12" and T("verOld") or ("v" .. tostring(p.ver))) or "-"
+            local ver = p.ver and verText(p.ver) or "-"
             out[#out + 1] = {
                 cells = { name, ver, concat(ways, ", "), countText(p.msgs), countText(p.recs), countText(p.new, true),
                     countText(p.whispered), last > 0 and ago(last, true) or "-", concat(state, ", ") },
@@ -5105,6 +5152,7 @@ local function setupWindow()
         end
         ui.shareBtn.text:SetText(lib.IsEnabled() and T("btnShareOn") or T("btnShareOff"))
         ui.channelBtn.text:SetText(settings().noChannel and T("btnChannelOff") or T("btnChannelOn"))
+        ui.tipBtn.text:SetText(lib.TooltipLinesOn() and T("btnTipOn") or T("btnTipOff"))
         ui.clearBtn.text:SetText(T("btnClear"))
         ui.viewBtn.text:SetText(ui.newOnly and T("btnViewNew") or T("btnViewAll"))
         if ui.tab == "recv" then ui.viewBtn:Show() else ui.viewBtn:Hide() end
@@ -5278,6 +5326,13 @@ local function setupWindow()
             refresh()
         end)
         ui.channelBtn:SetPoint("LEFT", ui.shareBtn, "RIGHT", 6, 0)
+        -- the shared lines on item and rare tooltips (sold by, drops, sightings)
+        ui.tipBtn = makeButton(f, 120, 22, function()
+            lib.SetTooltipLines(not lib.TooltipLinesOn())
+            say(lib.TooltipLinesOn() and T("tipLinesOn") or T("tipLinesOff"))
+            refresh()
+        end)
+        ui.tipBtn:SetPoint("LEFT", ui.channelBtn, "RIGHT", 6, 0)
         ui.clearBtn = makeButton(f, 110, 22, function()
             activity.clear()
             ui.offset = 0
@@ -5605,7 +5660,7 @@ function lib.AddVendorLine(tip, itemID)
 end
 
 function lib.OnUnitTooltip(tip, data)
-    if not (ownTooltip(tip) and lib.ShowsTooltips()) or type(data) ~= "table" then return end
+    if not (ownTooltip(tip) and lib.ShowsTooltips("unit")) or type(data) ~= "table" then return end
     local guid = data.guid
     if isSecret(guid) then return end
     local src, id = guidSource(guid)

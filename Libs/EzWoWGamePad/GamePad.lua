@@ -20,13 +20,18 @@
 --    The same mode has a key binding (Key Bindings > AddOns), so a gamepad
 --    button can be set for it; with the World Map open it also reaches the
 --    EzWoW icons and panels on the map. Pressed again, it gives the gamepad back.
+-- 4. Confirm(): a yes / no question of ours. With the gamepad UI on, the
+--    game's confirmation popup (StaticPopup) or chat box opened from addon
+--    code, or a frame made inside an open game window, runs the game's
+--    gamepad navigation code from that call: it is refused and the
+--    navigation stays broken until the interface is reloaded (tested).
 -- Secure buttons (items, spells) can't be clicked by addon code: while one
 -- is selected, A and X are bound to clicking it (an override binding).
 local _, ns = ...
 local type, pairs, ipairs, pcall, tonumber, select = type, pairs, ipairs, pcall, tonumber, select
 local abs, huge = math.abs, math.huge
 
-local LIB_VERSION = 23
+local LIB_VERSION = 25
 
 -- one table for every copy, so a newer copy loaded later updates the
 -- functions the older addons already hold
@@ -89,18 +94,21 @@ local function visible(f) return ask(f, "IsVisible") == true end
 local KNOWN_WINDOWS = {
     "EzWoWBagsWindow",
     "EzWoWBestGearFinderFrame", "EzWoWBestGearFinderConfig", "EzWoWBestGearFinderSearchFrame", "EzWoWBestGearFinderDonate",
-    "EzWoWChatTranslatorOptions",
+    "EzWoWBestGearFinderCriteria", "EzWoWBestGearFinderTryOn", "EzWoWBestGearFinderExport",
+    "EzWoWChatTranslatorOptions", "EzWoWChatTranslatorCopy",
     "EzWoWDruidFormsConfig", "EzWoWDruidFormsMenu", "EzWoWDruidFormsDonate",
     "EzWoW_DungeonRouteGuideFrame", "EzWoW_DungeonRouteGuideMapPanel", "EzWoW_DungeonRouteGuideConfig", "EzWoW_DungeonRouteGuideWingPicker", "EzWoW_DungeonRouteGuideDonate",
+    "EzWoW_DungeonRouteGuideExport",
     "EzWoWErrorCatcherMain", "EzWoWErrorCatcherDonate",
     "EzWoWFlightMapFrame", "EzWoWFlightMapSettings", "EzWoWFlightMapWorldPopover", "EzWoWFlightMapConfirm", "EzWoWFlightMapDonate",
-    "EzWoWFontChangerSettings",
+    "EzWoWFontChangerSettings", "EzWoWFontChangerFamily", "EzWoWFontChangerAdvanced", "EzWoWFontChangerTest",
     "EzWoWFrameMoverSettings", "EzWoWFrameMoverDonatePopup",
     "EzWoWGroupFinderMain", "EzWoWGroupFinderConfig", "EzWoWGroupFinderDonate",
     "EzWoWMapFinderPanel", "EzWoWMapFinderSettings", "EzWoWMapFinderDonate",
     "EzWoWMiniGamesWindow",
     "EzWoWProfessionRecipesFrame", "EzWoWProfessionRecipesSettings", "EzWoWProfessionRecipesDonate",
     "EzWoWQuestSettings",
+    "EzWoWShareWindow",
     "EzWoW_SmartFishingWindow", "EzWoW_SmartFishingMapLegend", "EzWoW_SmartFishingConfig", "EzWoW_SmartFishingDonate",
     "EzWoWSpellControlSettings", "EzWoWSpellControlSpellsByLevel", "EzWoWSpellControlDonate",
     "EzWoWTooltipConfig", "EzWoWTooltipDonate",
@@ -114,6 +122,8 @@ local HUD_FRAMES = {
     "EzWoW_DungeonRouteGuideHUD", "EzWoW_DungeonRouteGuideIcon", "EzWoW_SmartFishingHUD",
     "EzWoW_ErrorCatcherIcon", "EzWoW_GroupFinderIcon", "EzWoWBestGearFinderLauncher",
     "EzWoWProfessionRecipesQuickButton", "EzWoWFlightMapBar",
+    -- (cards that show up by themselves: reached with View, they never take the gamepad)
+    "EzWoWQuestXPFrame", "EzWoWMapFinderRareCard", "EzWoWGroupFinderRepost",
 }
 lib.windows = lib.windows or {}      -- frame -> options
 lib.stack = lib.stack or {}          -- open registered windows, newest last
@@ -274,7 +284,28 @@ end
 -- one is selected the gamepad buttons are not taken by the navigation frame
 -- (that would keep them from the bindings): every navigation button is bound
 -- to a hidden helper button instead, and A / X to the secure button itself.
+-- Item buttons (bag slots, EzWoW - Bags) are not protected frames, but their
+-- right click uses the item, which addon code can't do (tested: the game
+-- blocked UseContainerItem when the navigation clicked a bag slot): they go
+-- through the bindings too and are never clicked from addon code.
 local NAV_KEYS = { "PADDUP", "PADDDOWN", "PADDLEFT", "PADDRIGHT", "PAD2", "PADLSHOULDER", "PADRSHOULDER", "PADBACK" }
+
+local function isItemButton(f)
+    if ask(f, "IsObjectType", "ItemButton") then return true end
+    return type(f) == "table" and (type(f.GetBagID) == "function" or type(f.GetSlotAndBagID) == "function")
+end
+
+-- clicked only through a key binding (secure buttons and item buttons)
+local function clickedByBinding(f)
+    return ask(f, "IsProtected") == true or isItemButton(f)
+end
+
+-- the global name a binding can click the button by (nil: it has none)
+local function bindingName(f)
+    local name = ask(f, "GetName")
+    if type(name) == "string" and _G[name] == f then return name end
+    return nil
+end
 
 local function keyButton()
     if lib.keyButton then return lib.keyButton end
@@ -293,7 +324,7 @@ local function bindSecure(target)
     local nav = lib.nav
     if not nav or inCombat() or not (ClearOverrideBindings and SetOverrideBindingClick) then return end
     pcall(ClearOverrideBindings, nav)
-    local name = target and ask(target, "IsProtected") and ask(target, "GetName")
+    local name = target and clickedByBinding(target) and bindingName(target)
     if type(name) == "string" then
         keyButton()
         for _, key in ipairs(NAV_KEYS) do
@@ -324,14 +355,62 @@ local function hintText(key)
     local set = HINTS[(GetLocale and GetLocale()) or "enUS"] or HINTS.enUS
     return set[key] or HINTS.enUS[key]
 end
--- the button as the game draws it for the connected pad (Xbox, PlayStation,
--- Switch... the game's own icon); plain text when the game has none
-local function glyph(key, fallback)
-    if type(GetBindingText) == "function" then
-        local ok, text = pcall(GetBindingText, key)
-        if ok and type(text) == "string" and text ~= "" and text ~= key and not isSecret(text) then return text end
+-- A pad the game has no entry for gets its plain number pictures (1 2 3 4).
+-- The pad's maker (USB vendor number) still tells the layout of its buttons:
+-- PadStyle() gives the maker's picture set, nil when there is none.
+local MAKER_STYLE = { [0x045E] = "ltr", [0x054C] = "shp", [0x057E] = "rev" }   -- Microsoft, Sony, Nintendo
+local GAME_LABELS = { letters = true, shapes = true, reverse = true }   -- the game's own picture sets
+local STYLE_BUTTONS = {
+    ltr = { PAD1 = "a", PAD2 = "b", PAD3 = "x", PAD4 = "y" },
+    shp = { PAD1 = "cross", PAD2 = "circle", PAD3 = "square", PAD4 = "triangle" },
+    -- (Nintendo: the bottom button is B, the right one A)
+    rev = { PAD1 = "b", PAD2 = "a", PAD3 = "y", PAD4 = "x" },
+}
+local SHARED_BUTTONS = {
+    PADLSHOULDER = "lshoulder", PADRSHOULDER = "rshoulder",
+    PADDUP = "up", PADDDOWN = "down", PADDLEFT = "left", PADDRIGHT = "right",
+}
+
+-- (the game's active device is its combined one, which has no maker: the pads
+-- themselves are looked at, the first one the game has no pictures of whose
+-- maker is known)
+function lib.PadStyle()
+    local pad = C_GamePad
+    if not (pad and pad.GetAllDeviceIDs and pad.GetDeviceRawState and pad.GetDeviceMappedState) then return nil end
+    local ok, ids = pcall(pad.GetAllDeviceIDs)
+    if not ok or type(ids) ~= "table" then return nil end
+    for _, id in ipairs(ids) do
+        local okRaw, raw = pcall(pad.GetDeviceRawState, id)
+        local vendor = okRaw and type(raw) == "table" and raw.vendorID or nil
+        local style = type(vendor) == "number" and not isSecret(vendor) and MAKER_STYLE[vendor] or nil
+        if style then
+            local okMap, mapped = pcall(pad.GetDeviceMappedState, id)
+            local label = okMap and type(mapped) == "table" and mapped.labelStyle or nil
+            if type(label) ~= "string" or isSecret(label) or not GAME_LABELS[label:lower()] then return style end
+        end
     end
-    return fallback
+    return nil
+end
+
+-- the button as the game draws it for the connected pad (Xbox, PlayStation,
+-- Switch... the game's own icon); where the game draws a number, the maker's
+-- picture in the same size; plain text when the game has none
+local function glyph(key, fallback)
+    local text
+    if type(GetBindingText) == "function" then
+        local ok, t = pcall(GetBindingText, key)
+        if ok and type(t) == "string" and t ~= "" and t ~= key and not isSecret(t) then text = t end
+    end
+    if text and text:lower():find("gamepad_gen_", 1, true) then
+        local style = lib.PadStyle()
+        local name = style and ((STYLE_BUTTONS[style] or {})[key] or SHARED_BUTTONS[key])
+        local atlas = name and ("gamepad_" .. style .. "_" .. name .. "_64")
+        if atlas and C_Texture and C_Texture.GetAtlasInfo and C_Texture.GetAtlasInfo(atlas) then
+            local swapped, n = text:gsub("|[Aa]:[^:|]+:", "|A:" .. atlas .. ":", 1)
+            if n == 1 then return swapped end
+        end
+    end
+    return text or fallback
 end
 
 local function hintFrame()
@@ -478,8 +557,8 @@ function lib.OnButton(button)
         local target = lib.current or firstTarget(list)
         if not target then return end
         if target ~= lib.current then lib.Select(target) return end
-        -- secure buttons can't be clicked from addon code
-        if ask(target, "IsProtected") then return end
+        -- secure buttons and item buttons are clicked by the bindings (bindSecure), never from addon code
+        if clickedByBinding(target) then return end
         if target.Click then pcall(target.Click, target, button == "PAD3" and "RightButton" or "LeftButton") end
     elseif button == "PADLSHOULDER" then
         scroll(1)
@@ -612,11 +691,15 @@ function lib.OnWindowShown(frame)
     if not lib.IsActive() or inCombat() then return end
     -- already moving in our frames (opened from there): go on in the new window
     local already = lib.nav ~= nil and (lib.nav:IsGamePadButtonEnabled() or lib.boundSecure == true)
-    if not already then
+    -- (a question of ours takes it even from a game window)
+    local modal = (lib.windows[frame] or {}).modal == true
+    if not already and not modal then
         local name = ask(frame, "GetName")
         if (name and NO_AUTO[name]) or lib.GameHasFocus() then return end
     end
     lib.hudMode = false
+    -- a question of ours: the button it came from is selected again when it closes
+    if modal then lib.modalReturn = lib.current end
     lib.Select(nil)
     lib.Capture()
 end
@@ -625,8 +708,97 @@ function lib.OnWindowHidden(frame)
     for i = #lib.stack, 1, -1 do
         if lib.stack[i] == frame then table.remove(lib.stack, i) end
     end
+    local back
+    if (lib.windows[frame] or {}).modal then back, lib.modalReturn = lib.modalReturn, nil end
     if lib.current then lib.Select(nil) end
-    if not topWindow() and not lib.hudMode then lib.Release() end
+    if not topWindow() and not lib.hudMode then
+        lib.Release()
+        return
+    end
+    if back and visible(back) and not inCombat() then lib.Select(back) end
+    -- the key guide goes back under the window still open
+    if lib.UpdateHint then lib.UpdateHint() end
+end
+
+-----------------------------------------------------------------------------
+-- Confirm: a yes / no question of ours (for the gamepad UI, see 4. above).
+-- Moved through like the other EzWoW windows; it takes the gamepad even from
+-- a game window, B or Esc answers no. A question still open is replaced
+-- without an answer (as the game's popup does when it is reused).
+-----------------------------------------------------------------------------
+local CONFIRM_WORDS = {
+    koKR = { yes = "예", no = "아니요" },
+    enUS = { yes = "Yes", no = "No" },
+}
+
+local function confirmWord(key)
+    local set = CONFIRM_WORDS[(GetLocale and GetLocale()) or "enUS"] or CONFIRM_WORDS.enUS
+    return set[key] or CONFIRM_WORDS.enUS[key]
+end
+
+local function runAnswer(fn)
+    if type(fn) ~= "function" then return end
+    local ok, err = pcall(fn)
+    if not ok and geterrorhandler then geterrorhandler()(err) end
+end
+
+local function confirmFrame()
+    if lib.confirm then return lib.confirm end
+    local f = CreateFrame("Frame", "EzWoWPadConfirm", UIParent, BackdropTemplateMixin and "BackdropTemplate" or nil)
+    f:SetFrameStrata("FULLSCREEN_DIALOG")
+    f:SetToplevel(true)
+    f:SetClampedToScreen(true)
+    f:EnableMouse(true)
+    f:SetSize(380, 130)
+    f:SetPoint("CENTER", UIParent, "CENTER", 0, 120)
+    if f.SetBackdrop then
+        f:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8X8", edgeFile = "Interface\\Buttons\\WHITE8X8", edgeSize = 1 })
+        f:SetBackdropColor(0.05, 0.06, 0.08, 0.96)
+        f:SetBackdropBorderColor(1, 0.82, 0, 0.7)
+    end
+    f.text = f:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    f.text:SetPoint("TOP", f, "TOP", 0, -18)
+    f.text:SetWidth(340)
+    f.text:SetJustifyH("CENTER")
+    local function answer(yes)
+        local accept, cancel = f.onAccept, f.onCancel
+        f.onAccept, f.onCancel, f.answered = nil, nil, true
+        f:Hide()
+        runAnswer(yes and accept or cancel)
+    end
+    f.yes = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+    f.yes:SetSize(150, 24)
+    f.yes:SetPoint("BOTTOMRIGHT", f, "BOTTOM", -6, 16)
+    f.yes:SetScript("OnClick", function() answer(true) end)
+    f.no = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+    f.no:SetSize(150, 24)
+    f.no:SetPoint("BOTTOMLEFT", f, "BOTTOM", 6, 16)
+    f.no:SetScript("OnClick", function() answer(false) end)
+    -- closed some other way (Esc...): no
+    f:SetScript("OnHide", function()
+        if f.answered then return end
+        local cancel = f.onCancel
+        f.onAccept, f.onCancel, f.answered = nil, nil, true
+        runAnswer(cancel)
+    end)
+    f:Hide()
+    if UISpecialFrames then tinsert(UISpecialFrames, "EzWoWPadConfirm") end
+    lib.RegisterWindow(f, { modal = true, close = function() answer(false) end })
+    lib.confirm = f
+    return f
+end
+
+function lib.Confirm(text, onAccept, onCancel, yesText, noText)
+    local f = confirmFrame()
+    f.answered = true
+    f:Hide()
+    f.text:SetText(text or "")
+    f.yes:SetText(yesText or confirmWord("yes"))
+    f.no:SetText(noText or confirmWord("no"))
+    f.onAccept, f.onCancel, f.answered = onAccept, onCancel, false
+    f:SetHeight(math.max(110, (f.text:GetStringHeight() or 40) + 76))
+    f:Show()
+    return f
 end
 
 -- The World Map's aim mode is left to the game. A hook on its crosshair frame
@@ -663,11 +835,21 @@ end
 lib.HookView()
 
 -- the game says there is no window to move the gamepad to: the EzWoW
--- frames on screen take it (after the game's own call has finished)
+-- frames on screen take it (after the game's own call has finished). The
+-- text on screen is not always ERROR_NO_FRAME_TO_FOCUS (the Korean client
+-- shows "전환할 사용자 인터페이스 창이 없습니다!" while the string says
+-- "집중할 ..."), so the common part is matched as well.
+function lib.IsNoFrameMessage(text)
+    if type(text) ~= "string" or isSecret(text) then return false end
+    if ERROR_NO_FRAME_TO_FOCUS and text == ERROR_NO_FRAME_TO_FOCUS then return true end
+    if text:find("사용자 인터페이스 창이 없", 1, true) then return true end
+    local lower = text:lower()
+    return lower:find("no ui window", 1, true) ~= nil or lower:find("no interface window", 1, true) ~= nil
+end
 if not lib.errorHooked and UIErrorsFrame and hooksecurefunc then
     lib.errorHooked = true
     local function onMessage(_, text)
-        if isSecret(text) or not ERROR_NO_FRAME_TO_FOCUS or text ~= ERROR_NO_FRAME_TO_FOCUS then return end
+        if not (lib.IsNoFrameMessage and lib.IsNoFrameMessage(text)) then return end
         if C_Timer and C_Timer.After then
             C_Timer.After(0, function() if lib.EnterHUD then pcall(lib.EnterHUD) end end)
         end
@@ -744,6 +926,232 @@ if not lib.viewPoll then
         if wait > 0 then return end
         wait = 0.03
         if lib.PollMapView then pcall(lib.PollMapView) end
+    end)
+end
+
+-----------------------------------------------------------------------------
+-- Map marks and the gamepad cursor
+-----------------------------------------------------------------------------
+-- The World Map's gamepad cursor only looks at the game's own pin pools, so
+-- the EzWoW marks drawn as plain frames on the map (quest marks, NPC spots,
+-- search results) showed no tooltip with the gamepad. Those marks are
+-- registered here (MapMark). While the cursor is on the map its position is
+-- read (nothing of the game's is called or changed) and the mark under it
+-- gets OnEnter / OnLeave from this addon's own update, as a mouse gives them.
+lib.mapMarks = lib.mapMarks or setmetatable({}, { __mode = "k" })
+function lib.MapMark(f)
+    if type(f) == "table" then lib.mapMarks[f] = true end
+end
+
+local MARK_PAD = 3   -- screen pixels around a mark that still count as on it
+
+-- all of a script's handlers (hooks too) when the client can run them so
+local function runScript(f, script)
+    local run = rawget(_G, "ExecuteFrameScript")
+    if type(run) == "function" and pcall(run, f, script) then return end
+    callScript(f, script)
+end
+
+-- the registered mark under a screen point (the top one when marks overlap)
+local function markUnder(cx, cy)
+    local best, bestLevel
+    for f in pairs(lib.mapMarks) do
+        -- (only marks on the World Map: the same pin kinds also show on the minimap)
+        if visible(f) and ask(f, "IsMouseEnabled") ~= false and onMap(f) then
+            local l, b, w, h = rectOf(f)
+            if l and cx >= l - MARK_PAD and cx <= l + w + MARK_PAD and cy >= b - MARK_PAD and cy <= b + h + MARK_PAD then
+                local level = ask(f, "GetFrameLevel") or 0
+                if not best or level > bestLevel then best, bestLevel = f, level end
+            end
+        end
+    end
+    return best
+end
+
+function lib.MapHoverTick()
+    local hit
+    local map, cursor = rawget(_G, "WorldMapFrame"), rawget(_G, "SoftCursor")
+    if type(cursor) == "table" and visible(map) and ask(cursor, "IsShown") == true and lib.IsActive() then
+        local l, b, w, h = rectOf(cursor)
+        if l and w > 0 then hit = markUnder(l + w / 2, b + h / 2) end
+    end
+    if hit == lib.mapHover then
+        -- the game's own pin on the same spot was entered after ours and left the
+        -- tooltip empty (seen with quest pins): ours again, a few times at most
+        -- (a tooltip the game's pin shows itself is left alone)
+        if hit and ask(GameTooltip, "IsShown") ~= true and (lib.markRetry or 0) < 3 then
+            lib.markRetry = (lib.markRetry or 0) + 1
+            runScript(hit, "OnEnter")
+        end
+        return
+    end
+    lib.markRetry = 0
+    local old = lib.mapHover
+    lib.mapHover = hit
+    if old then runScript(old, "OnLeave") end
+    if hit then runScript(hit, "OnEnter") end
+end
+
+-----------------------------------------------------------------------------
+-- EzWoW map pins outside the game's pin pools (gamepad UI)
+-----------------------------------------------------------------------------
+-- With the gamepad UI on, the game's map runs the mouse-enter / mouse-leave
+-- code of the pins near its cursor itself (also for every pin it lets go and
+-- when the map closes). An EzWoW pin in its pools makes that addon code: the
+-- rest of the game's call is tainted and its own gamepad step is refused
+-- ("Interface action failed because of an AddOn" when the map was closed with
+-- B, tested). While the gamepad UI is on, the EzWoW pins are made here
+-- instead: the same template as a frame of our own on the map's canvas,
+-- placed and scaled by this code (the map's own position code puts pins in
+-- its nudging lists, so it is not called for them), the gamepad cursor's
+-- hover coming through MapMark. With the gamepad UI off the map's pools are
+-- used as before.
+lib.ownPinSets = lib.ownPinSets or {}   -- template -> { active = { pin = true }, free = { pin, ... } }
+
+local function ownPinCanvas(pin)
+    local map = pin.owningMap
+    return map, map and map.GetCanvas and map:GetCanvas()
+end
+
+local function placeOwnPin(pin)
+    local _, canvas = ownPinCanvas(pin)
+    local x, y = pin.normalizedX, pin.normalizedY
+    if not (canvas and x and y) then return end
+    local scale = pin:GetScale() or 1
+    if scale <= 0 then scale = 1 end
+    pin:ClearAllPoints()
+    pin:SetPoint("CENTER", canvas, "TOPLEFT", canvas:GetWidth() * x / scale, -canvas:GetHeight() * y / scale)
+    -- (as the game does with the gamepad: nothing off the map art)
+    pin:SetShown(x >= 0 and x <= 1 and y >= 0 and y <= 1)
+end
+
+local function scaleOwnPin(pin)
+    local map = pin.owningMap
+    if not map then return end
+    local ignoreGlobal = type(pin.IsIgnoringGlobalPinScale) == "function" and pin:IsIgnoringGlobalPinScale()
+    local scale
+    if pin.startScale and pin.endScale then
+        local canvasScale = map.GetCanvasScale and map:GetCanvasScale() or 1
+        local zoom = map.GetCanvasZoomPercent and map:GetCanvasZoomPercent() or 0
+        local f = math.max(0, math.min(1, (pin.scaleFactor or 1) * zoom))
+        scale = (1 / (canvasScale > 0 and canvasScale or 1)) * (pin.startScale + (pin.endScale - pin.startScale) * f)
+    elseif not ignoreGlobal then
+        scale = 1
+    end
+    if scale then
+        if not ignoreGlobal and map.GetGlobalPinScale then scale = scale * (map:GetGlobalPinScale() or 1) end
+        pin:SetScale(scale)
+    end
+    placeOwnPin(pin)
+end
+
+-- the level the map would give the pin (its level table is only read)
+local function levelOwnPin(pin)
+    local map, canvas = ownPinCanvas(pin)
+    local level
+    local mgr = map and map.GetPinFrameLevelsManager and map:GetPinFrameLevelsManager()
+    if type(mgr) == "table" and type(mgr.GetValidFrameLevel) == "function" then
+        local ok, l = pcall(mgr.GetValidFrameLevel, mgr, pin.pinFrameLevelType, pin.pinFrameLevelIndex)
+        if ok and type(l) == "number" and not isSecret(l) then level = l end
+    end
+    if not level and canvas then level = (canvas:GetFrameLevel() or 0) + 40 end
+    if level then pin:SetFrameLevel(level) end
+end
+
+local ownPinHooked, ownPinKey
+local function refreshOwnPins()
+    local map = rawget(_G, "WorldMapFrame")
+    local canvas = map and map.GetCanvas and map:GetCanvas()
+    -- (the map calls its canvas hooks on every frame with the gamepad cursor on it)
+    local key = canvas and map.GetCanvasScale and format("%.4f:%.1f:%.1f", map:GetCanvasScale() or 0, canvas:GetWidth() or 0, canvas:GetHeight() or 0)
+    if key and key == ownPinKey then return end
+    ownPinKey = key
+    for _, set in pairs(lib.ownPinSets) do
+        for pin in pairs(set.active) do pcall(scaleOwnPin, pin) end
+    end
+end
+
+local function hookOwnPins(map)
+    if ownPinHooked or type(map) ~= "table" or not hooksecurefunc then return end
+    ownPinHooked = true
+    for _, method in ipairs({ "OnCanvasScaleChanged", "OnCanvasSizeChanged" }) do
+        if type(map[method]) == "function" then
+            pcall(hooksecurefunc, map, method, function() pcall(refreshOwnPins) end)
+        end
+    end
+end
+
+-- A pin of an EzWoW template on the map (the map's pool, or ours with the gamepad UI on)
+function lib.AcquireMapPin(map, template, ...)
+    if not lib.IsActive() then return map:AcquirePin(template, ...) end
+    local set = lib.ownPinSets[template]
+    if not set then
+        set = { active = {}, free = {} }
+        lib.ownPinSets[template] = set
+    end
+    local canvas = map:GetCanvas()
+    local pin = table.remove(set.free)
+    if not pin then
+        -- made without a parent and put on the canvas below (see lib.MakeFrame)
+        pin = CreateFrame("Frame", nil, nil, template)
+        -- the map's own position and scale code is not used for these pins
+        pin.SetPosition = function(self, x, y)
+            self.normalizedX, self.normalizedY = x, y
+            placeOwnPin(self)
+        end
+        pin.ApplyCurrentPosition = placeOwnPin
+        pin.ApplyCurrentScale = scaleOwnPin
+        pin.ApplyFrameLevel = levelOwnPin
+        -- the mouse as the map gives it to its pins
+        pin:SetScript("OnEnter", function(self) if self.OnMouseEnter then self:OnMouseEnter() end end)
+        pin:SetScript("OnLeave", function(self) if self.OnMouseLeave then self:OnMouseLeave() end end)
+        pin:SetScript("OnMouseUp", function(self, button) if self.OnClick then self:OnClick(button) end end)
+        lib.MapMark(pin)
+        -- a template without an OnLoad script of its own gets its mixin's OnLoad here
+        -- (one with it has run it already: twice would draw its textures twice)
+        pin.owningMap = map
+        if type(pin.OnLoad) == "function" and not pin:GetScript("OnLoad") then pin:OnLoad() end
+    end
+    pin:SetParent(canvas)
+    pin.pinTemplate = template
+    pin.owningMap = map
+    set.active[pin] = true
+    hookOwnPins(map)
+    pin:Show()
+    levelOwnPin(pin)
+    if pin.OnAcquired then pin:OnAcquired(...) end
+    scaleOwnPin(pin)
+    return pin
+end
+
+-- every pin of the template, both kinds (the map's pool may still have some
+-- from before the gamepad UI was turned on)
+function lib.RemoveMapPins(map, template)
+    if map and map.RemoveAllPinsByTemplate then map:RemoveAllPinsByTemplate(template) end
+    local set = lib.ownPinSets[template]
+    if not set then return end
+    for pin in pairs(set.active) do
+        if lib.mapHover == pin then
+            lib.mapHover = nil
+            runScript(pin, "OnLeave")
+        end
+        pin:Hide()
+        pin:ClearAllPoints()
+        if pin.OnReleased then pcall(pin.OnReleased, pin) end
+        set.active[pin] = nil
+        set.free[#set.free + 1] = pin
+    end
+end
+
+-- every newer copy sets the update again (an older copy may have made the frame)
+lib.markPoll = lib.markPoll or CreateFrame("Frame")
+do
+    local wait = 0
+    lib.markPoll:SetScript("OnUpdate", function(_, elapsed)
+        wait = wait - elapsed
+        if wait > 0 then return end
+        wait = 0.06
+        if lib.MapHoverTick and (lib.mapHover or next(lib.mapMarks)) then pcall(lib.MapHoverTick) end
     end)
 end
 

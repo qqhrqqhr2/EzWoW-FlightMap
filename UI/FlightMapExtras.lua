@@ -414,15 +414,25 @@ end
 -----------------------------------------------------------------------------
 -- Dungeon entrances
 -----------------------------------------------------------------------------
--- The client's entrance list first (per continent, then per zone), else the
--- shared EzWoW - Data dungeon list when it is already loaded. Level ranges
--- come from that list when it is there.
+-- The client's entrance list first (per continent, then per zone), else a
+-- dungeon list: EzWoW - Dungeon Route Guide's own one, the shared EzWoW - Data
+-- one when it is already loaded, or else that one loaded from here (no other
+-- addon loads it any more when the route guide has all its data). Level
+-- ranges come from that list when it is there.
 local LOCALE_FIELD = { koKR = "ko", enUS = "en", enGB = "en", deDE = "de", frFR = "fr", esES = "es", esMX = "es", ruRU = "ru", zhCN = "zhCN", zhTW = "zhTW" }
 
 local function dungeonList()
+    local own = _G.EzWoWDungeonRouteGuideDungeons
+    if type(own) == "table" and #own > 0 then return own end
     local D = _G.EzWoW_Data
     if type(D) ~= "table" or D.formatVersion ~= 2 or type(D.Peek) ~= "function" then return nil end
     local ok, t = pcall(D.Peek, "Dungeons", "list")
+    if ok and type(t) == "table" then return t end
+    -- (out of combat the module loads right away; in combat the load waits and
+    -- the next drawing finds it; a module that can't load is not tried again)
+    if type(D.Load) ~= "function" then return nil end
+    pcall(D.Load, "Dungeons")
+    ok, t = pcall(D.Peek, "Dungeons", "list")
     return ok and type(t) == "table" and t or nil
 end
 
