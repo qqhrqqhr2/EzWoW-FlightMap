@@ -25,13 +25,16 @@
 --    code, or a frame made inside an open game window, runs the game's
 --    gamepad navigation code from that call: it is refused and the
 --    navigation stays broken until the interface is reloaded (tested).
+-- 5. KeepOnScreen(): an EzWoW window taller than the screen (a small screen,
+--    a large UI scale) is shrunk to fit, also when it grows or the UI scale
+--    changes. Every addon works alone, so this lives in each copy too.
 -- Secure buttons (items, spells) can't be clicked by addon code: while one
 -- is selected, A and X are bound to clicking it (an override binding).
 local _, ns = ...
 local type, pairs, ipairs, pcall, tonumber, select = type, pairs, ipairs, pcall, tonumber, select
 local abs, huge = math.abs, math.huge
 
-local LIB_VERSION = 25
+local LIB_VERSION = 26
 
 -- one table for every copy, so a newer copy loaded later updates the
 -- functions the older addons already hold
@@ -92,7 +95,7 @@ local function visible(f) return ask(f, "IsVisible") == true end
 -----------------------------------------------------------------------------
 -- EzWoW windows a player opens and uses with buttons
 local KNOWN_WINDOWS = {
-    "EzWoWBagsWindow",
+    "EzWoWBagsWindow", "EzWoWBagsOptions",
     "EzWoWBestGearFinderFrame", "EzWoWBestGearFinderConfig", "EzWoWBestGearFinderSearchFrame", "EzWoWBestGearFinderDonate",
     "EzWoWBestGearFinderCriteria", "EzWoWBestGearFinderTryOn", "EzWoWBestGearFinderExport",
     "EzWoWChatTranslatorOptions", "EzWoWChatTranslatorCopy",
@@ -1154,6 +1157,55 @@ do
         if lib.MapHoverTick and (lib.mapHover or next(lib.mapMarks)) then pcall(lib.MapHoverTick) end
     end)
 end
+
+-----------------------------------------------------------------------------
+-- 5. Windows on small screens: KeepOnScreen(frame) shrinks a window taller
+-- than the screen to fit, now and whenever it opens, its size changes or the
+-- UI scale / screen size changes. Each EzWoW window calls it right after it
+-- is made (a new frame starts shown, so its first OnShow never comes).
+-----------------------------------------------------------------------------
+lib.fitted = lib.fitted or setmetatable({}, { __mode = "k" })
+
+function lib.FitToScreen(frame)
+    if type(frame) ~= "table" or type(frame.GetHeight) ~= "function" then return end
+    local avail = UIParent and UIParent:GetHeight()
+    local h = frame:GetHeight()
+    if type(avail) ~= "number" or avail <= 0 or type(h) ~= "number" or h <= 0 then return end
+    local s = math.max(0.5, math.min(1, (avail - 20) / h))
+    if abs((frame:GetScale() or 1) - s) > 0.001 then frame:SetScale(s) end
+end
+
+function lib.KeepOnScreen(frame)
+    if type(frame) ~= "table" or type(frame.GetHeight) ~= "function" then return end
+    if not lib.fitted[frame] then
+        lib.fitted[frame] = true
+        local function fit(self)
+            if lib.FitToScreen then pcall(lib.FitToScreen, type(self) == "table" and self or frame) end
+        end
+        -- (method hooks too: a later SetScript would drop a script hook)
+        for _, method in ipairs({ "Show", "SetShown", "SetHeight", "SetSize" }) do
+            if type(frame[method]) == "function" then hooksecurefunc(frame, method, fit) end
+        end
+        if type(frame.HookScript) == "function" then
+            pcall(frame.HookScript, frame, "OnShow", fit)
+            pcall(frame.HookScript, frame, "OnSizeChanged", fit)
+        end
+    end
+    lib.FitToScreen(frame)
+end
+
+-- the UI scale or the screen size changed: the open windows fit again
+-- (the events may not exist: pcall)
+if not lib.fitEvents then
+    lib.fitEvents = CreateFrame("Frame")
+    pcall(lib.fitEvents.RegisterEvent, lib.fitEvents, "UI_SCALE_CHANGED")
+    pcall(lib.fitEvents.RegisterEvent, lib.fitEvents, "DISPLAY_SIZE_CHANGED")
+end
+lib.fitEvents:SetScript("OnEvent", function()
+    for frame in pairs(lib.fitted) do
+        if frame:IsShown() and lib.FitToScreen then pcall(lib.FitToScreen, frame) end
+    end
+end)
 
 -- windows made later (most are made the first time they open)
 if not lib.watcher and C_Timer and C_Timer.NewTicker then

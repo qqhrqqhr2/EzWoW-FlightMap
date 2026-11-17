@@ -39,7 +39,7 @@ local ADDON_NAME, ns = ...
 local type, pairs, ipairs, tonumber, tostring, pcall, next = type, pairs, ipairs, tonumber, tostring, pcall, next
 local floor, format, concat, max, min = math.floor, string.format, table.concat, math.max, math.min
 
-local LIB_VERSION = 16
+local LIB_VERSION = 17
 
 -- one table for every copy (a newer copy updates the functions in it)
 local lib = _G.EzWoW_Share
@@ -91,9 +91,29 @@ local TEXTS = {
         off = "Data sharing is off. Nothing is sent or received.",
         channelOn = "The shared data channel is used.",
         channelOff = "Only the party, raid and guild are used (no channel).",
-        tipLinesOn = "Tooltips show the shared lines (sold by, drops, rare sightings).",
-        tipLinesOff = "Tooltips do not show the shared lines (sold by, drops, rare sightings).",
-        help = "/ezshare (window) | on | off | channel on | channel off | tooltip on | tooltip off | status | roster | ping [name]",
+        tipLinesOn = "Tooltips show the EzWoW lines.",
+        tipLinesOff = "Tooltips do not show any EzWoW lines.",
+        mapOn = "Maps show the EzWoW marks.",
+        mapOff = "Maps do not show any EzWoW marks.",
+        sharedMarksOn = "Maps show the marks made from shared records.",
+        sharedMarksOff = "Maps do not show the marks made from shared records.",
+        help = "/ezshare (window) | settings | on | off | channel on | channel off | tooltip on | tooltip off | map on | map off | map shared on | map shared off | status | roster | ping [name]",
+        helpUser = "/ezshare (settings) | on | off | channel on | channel off | tooltip on | tooltip off | map on | map off | map shared on | map shared off",
+        setShare = "Share records with other EzWoW players",
+        setShareTip = "Swaps what you saw in the game (vendors, drops, quest NPCs, rare monsters, gathering spots) with other EzWoW players. Off: nothing is sent or received.",
+        setChannel = "Share with the whole server",
+        setChannelTip = "Uses a hidden data channel to reach the EzWoW players of your server. Off: only your party, raid and guild.",
+        setTips = "Show EzWoW info on tooltips",
+        setTipsTip = "Off: hides every line the EzWoW addons add to the game's tooltips (items, monsters, spells...) and their EzWoW - ... labels. The settings of each addon stay as they are.",
+        settingsWhere = "Settings: Game Menu > Options > AddOns > EzWoW - Data Sharing",
+        setIntro = "Settings for every EzWoW addon at once: sharing what you find with other players, the EzWoW info on tooltips and the EzWoW marks on maps.",
+        setOpen = "Settings (/ezshare)",
+        setHint = "Type /ezshare in chat to open the settings too.",
+        setSub = "Settings for every EzWoW addon",
+        setMap = "Show EzWoW marks on maps",
+        setMapTip = "Off: hides every mark the EzWoW addons put on the world map and the minimap (quest ! and ?, objectives, NPC and gathering spots, boats and zone exits, dungeon entrances, flight masters, fishing spots). Search results you ask for and the buttons on the map stay.",
+        setShared = "Marks made from shared records",
+        setSharedTip = "Off: hides only the marks sharing adds on its own (zone exits, shared herb and ore spots, other players' fishing spots). Quest and NPC spots keep using the shared records.",
         status = "Records: quests %d, rare sightings %d, drop sources %d, gathering spots %d.",
         applied = "Of these, received from other players and in use: quests %d, rare sightings %d, drop sources %d, gathering spots %d.",
         traffic = "This session: %d records received from %d players, %d messages sent.",
@@ -184,9 +204,29 @@ local TEXTS = {
         off = "데이터 공유를 껐습니다. 보내지도 받지도 않습니다.",
         channelOn = "공유 데이터 채널을 씁니다.",
         channelOff = "파티·공격대·길드로만 공유합니다(채널 안 씀).",
-        tipLinesOn = "툴팁에 공유 기록 줄(판매·드롭·희귀 목격)을 보여 줍니다.",
-        tipLinesOff = "툴팁에 공유 기록 줄(판매·드롭·희귀 목격)을 보여 주지 않습니다.",
-        help = "/ezshare (창 열기) | on | off | channel on | channel off | tooltip on | tooltip off | status | roster | ping [이름]  (/공유, /공유 툴팁 켜기·끄기)",
+        tipLinesOn = "툴팁에 EzWoW 정보 줄을 보여 줍니다.",
+        tipLinesOff = "툴팁에 EzWoW 정보 줄을 보여 주지 않습니다.",
+        mapOn = "지도에 EzWoW 표시를 보여 줍니다.",
+        mapOff = "지도에 EzWoW 표시를 보여 주지 않습니다.",
+        sharedMarksOn = "지도에 공유 기록으로 생긴 표시를 보여 줍니다.",
+        sharedMarksOff = "지도에 공유 기록으로 생긴 표시를 보여 주지 않습니다.",
+        help = "/ezshare (창 열기) | settings | on | off | channel on | channel off | tooltip on | tooltip off | map on | map off | map shared on | map shared off | status | roster | ping [이름]  (/공유, /공유 툴팁 켜기·끄기, /공유 지도 켜기·끄기, /공유 지도 공유 켜기·끄기)",
+        helpUser = "/ezshare (설정 열기) | on | off | channel on | channel off | tooltip on | tooltip off | map on | map off | map shared on | map shared off  (/공유, /공유 툴팁 켜기·끄기, /공유 지도 켜기·끄기, /공유 지도 공유 켜기·끄기)",
+        setShare = "다른 EzWoW 사용자와 기록 공유",
+        setShareTip = "게임하며 본 상인·드롭·퀘스트 NPC·희귀 몬스터·채집 위치를 다른 EzWoW 사용자와 주고받습니다. 끄면 보내지도 받지도 않습니다.",
+        setChannel = "같은 서버 전체와 공유",
+        setChannelTip = "숨은 데이터 채널로 같은 서버의 EzWoW 사용자와 주고받습니다. 끄면 파티·공격대·길드끼리만 주고받습니다.",
+        setTips = "툴팁에 EzWoW 정보 표시",
+        setTipsTip = "끄면 EzWoW 애드온들이 게임 툴팁(아이템·몬스터·주문 등)에 붙이는 줄과 EzWoW - … 이름표를 모두 숨깁니다. 각 애드온의 설정은 그대로입니다.",
+        settingsWhere = "설정: 게임 메뉴 > 설정 > 애드온 > EzWoW - Data Sharing",
+        setIntro = "모든 EzWoW 애드온에 함께 적용되는 설정입니다: 다른 사용자와 기록 공유, 툴팁의 EzWoW 정보, 지도의 EzWoW 표시.",
+        setOpen = "설정 (/ezshare)",
+        setHint = "채팅창에 /ezshare 를 입력해도 열립니다.",
+        setSub = "모든 EzWoW 애드온에 함께 적용되는 설정",
+        setMap = "지도에 EzWoW 표시",
+        setMapTip = "끄면 EzWoW 애드온들이 세계 지도·미니맵에 찍는 표시(퀘스트 !·?, 목표 위치, NPC·채집 위치, 교통편·지역 입구, 던전 입구, 비행 조련사, 낚시터)를 모두 숨깁니다. 직접 검색한 결과와 지도 위 버튼은 그대로입니다.",
+        setShared = "공유 기록으로 생긴 표시",
+        setSharedTip = "끄면 공유 기능으로 따로 생기는 표시(지역 입구, 공유된 약초·광석 위치, 다른 사용자 낚시터)만 숨깁니다. 퀘스트·NPC 위치는 그대로 공유 기록을 섞어 보여 줍니다.",
         status = "기록: 퀘스트 %d, 희귀 몬스터 목격 %d, 드롭 출처 %d, 채집 위치 %d.",
         applied = "그중 다른 사람에게 받아 쓰고 있는 것: 퀘스트 %d, 희귀 몬스터 목격 %d, 드롭 출처 %d, 채집 위치 %d.",
         traffic = "이번 접속: 받은 기록 %d개 (보낸 사람 %d명), 보낸 메시지 %d개.",
@@ -547,6 +587,20 @@ end
 -- the player's choice only
 function lib.TooltipLinesOn() return settings().noTooltip ~= true end
 function lib.SetTooltipLines(on) settings().noTooltip = not on or nil end
+-- Marks on the maps (the player's choice): every EzWoW mark at once, and,
+-- under it, the marks only the shared records make (zone exits, shared
+-- gathering spots, other players' fishing spots). The addons that draw them
+-- ask these and redraw on the notice { mapMarks = true }.
+function lib.MapMarksOn() return settings().noMapMarks ~= true end
+function lib.SharedMarksOn() return lib.MapMarksOn() and settings().noSharedMarks ~= true end
+function lib.SetMapMarks(on)
+    settings().noMapMarks = not on or nil
+    for _, fn in pairs(lib.callbacks or {}) do pcall(fn, { mapMarks = true }) end
+end
+function lib.SetSharedMarks(on)
+    settings().noSharedMarks = not on or nil
+    for _, fn in pairs(lib.callbacks or {}) do pcall(fn, { mapMarks = true }) end
+end
 -- kind "unit": rare sightings on unit tooltips; else item tooltip lines
 function lib.ShowsTooltips(kind)
     if not lib.TooltipLinesOn() then return false end
@@ -2966,10 +3020,11 @@ end
 
 function lib.OnPing(text, sender)
     learnMe()
+    -- (the chat lines are the developer's: players do not ping, see lib.DevMode)
     if text == PONG then
-        say(format(T("pong"), sender))
+        if lib.DevMode() then say(format(T("pong"), sender)) end
     elseif isMe(sender) or baseName(sender) == myKey then
-        say(T("pingSelf"))
+        if lib.DevMode() then say(T("pingSelf")) end
     elseif clock() - (pongAt[sender] or -100) >= 10 then
         pongAt[sender] = clock()
         whisperRaw(PONG, sender)
@@ -4306,10 +4361,339 @@ local function rosterLine()
         .. " " .. format(T("rosterLeft"), left.server, left.faction, left.away, left.noname)
 end
 
+-----------------------------------------------------------------------------
+-- Players: the settings window (/ezshare; the game's Options > AddOns page
+-- "EzWoW - Data Sharing" has a button for it, as the other EzWoW addons do).
+-- Each switch counts for every EzWoW addon and is kept with the shared data
+-- (the copy where it changed last counts, see lib.TakeIn). The activity
+-- window and the chat replies of /ezshare are the developer's: only with the
+-- data scanner.
+-----------------------------------------------------------------------------
+-- the name of the window, the options page and the line under the shared
+-- tooltip lines: English in every language, like the other EzWoW addons
+lib.SHARE_TITLE = "EzWoW - Data Sharing"
+
+function lib.DevMode()
+    local loaded = (C_AddOns and C_AddOns.IsAddOnLoaded) or _G.IsAddOnLoaded
+    if type(loaded) ~= "function" then return false end
+    local ok, on = pcall(loaded, "EzWoW-DataDumper")
+    return ok and on == true
+end
+
+-- (in a function of its own: the file is at Lua's limit of 200 locals)
+function lib.SetupSettings()
+    local SHARE_TITLE = lib.SHARE_TITLE
+    -- the look of the other EzWoW windows (the sharing's accent: cyan)
+    local C = {
+        bg = { 0.071, 0.094, 0.122 }, bg2 = { 0.114, 0.157, 0.192 }, border = { 0.204, 0.298, 0.357 },
+        text = { 0.929, 0.957, 0.969 }, muted = { 0.655, 0.725, 0.773 }, off = { 0.388, 0.447, 0.482 },
+        accent = { 0.294, 0.784, 0.910 },
+    }
+    local WHITE = "Interface\\Buttons\\WHITE8X8"
+    local LINE = { bgFile = WHITE, edgeFile = WHITE, edgeSize = 1 }
+    -- (the copy in use: the folder of its addon)
+    local ICON = "Interface\\AddOns\\" .. tostring(lib.owner) .. "\\Libs\\EzWoWShare\\Icon"
+    local WIDTH, X = 440, 20
+    local settingsUI = {}
+
+    -- a flat button like those of the other EzWoW addons (accent: the main one)
+    local function flatButton(parent, w, h, accent, onClick)
+        local b = CreateFrame("Button", nil, parent, "BackdropTemplate")
+        b:SetSize(w, h)
+        if b.SetBackdrop then b:SetBackdrop(LINE) end
+        local label = b:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        label:SetPoint("CENTER", 0, 0)
+        b.label = label
+        local function look()
+            if not b.SetBackdropColor then return end
+            if accent then
+                b:SetBackdropColor(0.14, 0.24, 0.30, 0.96)
+                b:SetBackdropBorderColor(C.accent[1], C.accent[2], C.accent[3], 1)
+                label:SetTextColor(C.accent[1], C.accent[2], C.accent[3])
+            else
+                b:SetBackdropColor(C.bg2[1], C.bg2[2], C.bg2[3], 0.96)
+                b:SetBackdropBorderColor(C.border[1], C.border[2], C.border[3], 1)
+                label:SetTextColor(C.text[1], C.text[2], C.text[3])
+            end
+        end
+        look()
+        b:SetScript("OnEnter", function(self)
+            if not self.SetBackdropColor then return end
+            self:SetBackdropColor(0.18, 0.28, 0.35, 1)
+            self:SetBackdropBorderColor(C.accent[1], C.accent[2], C.accent[3], 1)
+        end)
+        b:SetScript("OnLeave", look)
+        b:SetScript("OnMouseDown", function() label:SetPoint("CENTER", 1, -1) end)
+        b:SetScript("OnMouseUp", function() label:SetPoint("CENTER", 0, 0) end)
+        function b:SetText(text) label:SetText(text or "") end
+        function b:GetText() return label:GetText() end
+        if onClick then b:SetScript("OnClick", onClick) end
+        return b
+    end
+
+    -- Only the switches that matter for the EzWoW addons loaded (each addon
+    -- works alone): the tooltip one with an addon that adds tooltip lines, the
+    -- map ones with an addon that draws marks on the maps
+    local TIP_HOSTS = { "EzWoW-Tooltip", "EzWoW-MapFinder", "EzWoW-BestGearFinder", "EzWoW-ProfessionRecipes",
+        "EzWoW-Bags", "EzWoW-Quest", "EzWoW-SmartFishing", "EzWoW-ChatTranslator", "EzWoW-SpellControl" }
+    local MAP_HOSTS = { "EzWoW-MapFinder", "EzWoW-Quest", "EzWoW-DungeonRouteGuide", "EzWoW-FlightMap", "EzWoW-SmartFishing" }
+    local function anyLoaded(list)
+        return function()
+            for _, name in ipairs(list) do
+                if lib.hosts and lib.hosts[name] then return true end
+            end
+            return false
+        end
+    end
+
+    -- { text, help, get, set, [the switch above it: a row under it counts only
+    -- while that is on], [shown only when this says so] }
+    local function settingsChecks()
+        return {
+            { "setShare", "setShareTip", function() return lib.IsEnabled() end,
+                function(on) lib.SetEnabled(on) end },
+            { "setChannel", "setChannelTip", function() return settings().noChannel ~= true end,
+                function(on) lib.SetEnabled(lib.IsEnabled(), on) end, function() return lib.IsEnabled() end },
+            { "setTips", "setTipsTip", function() return lib.TooltipLinesOn() end,
+                function(on) lib.SetTooltipLines(on) end, nil, anyLoaded(TIP_HOSTS) },
+            { "setMap", "setMapTip", function() return lib.MapMarksOn() end,
+                function(on) lib.SetMapMarks(on) end, nil, anyLoaded(MAP_HOSTS) },
+            { "setShared", "setSharedTip", function() return settings().noSharedMarks ~= true end,
+                function(on) lib.SetSharedMarks(on) end, function() return lib.MapMarksOn() end, anyLoaded(MAP_HOSTS) },
+        }
+    end
+
+    function lib.RefreshSettings()
+        local f = settingsUI.frame
+        if not (f and f:IsShown()) then return end
+        for _, row in ipairs(settingsUI.rows or {}) do
+            local ok, on = pcall(row.spec[3])
+            row.check:SetChecked(ok and on == true)
+            -- (a row under another switch only counts while that one is on)
+            local usable = true
+            if row.spec[5] then
+                local okUp, up = pcall(row.spec[5])
+                usable = okUp and up == true
+            end
+            row.check:SetEnabled(usable)
+            local c = usable and C.text or C.off
+            row.label:SetTextColor(c[1], c[2], c[3])
+            c = usable and C.muted or C.off
+            row.help:SetTextColor(c[1], c[2], c[3])
+        end
+    end
+
+    -- the rows one under the other, as tall as their texts in the language of the moment
+    local function layout()
+        local f = settingsUI.frame
+        local y = -70
+        for _, row in ipairs(settingsUI.rows) do
+            local okShown, shown = true, true
+            if row.spec[6] then okShown, shown = pcall(row.spec[6]) end
+            if okShown and shown == false then
+                row.check:Hide()
+            else
+                row.check:Show()
+                local indent = row.spec[5] and 24 or 0
+                local w = WIDTH - 2 * X - 28 - indent
+                row.label:SetWidth(w)
+                row.help:SetWidth(w)
+                row.label:SetText(T(row.spec[1]))
+                row.help:SetText(T(row.spec[2]))
+                row.check:ClearAllPoints()
+                row.check:SetPoint("TOPLEFT", f, "TOPLEFT", X - 4 + indent, y)
+                local h = 5 + (row.label:GetStringHeight() or 14) + 3 + (row.help:GetStringHeight() or 12)
+                y = y - max(26, h) - 12
+            end
+        end
+        f:SetHeight(-y + 26)
+    end
+
+    local function buildSettings()
+        if settingsUI.frame then return settingsUI.frame end
+        local f = CreateFrame("Frame", "EzWoWShareSettings", UIParent, "BackdropTemplate")
+        f:Hide()
+        f:SetSize(WIDTH, 300)
+        f:SetPoint("CENTER")
+        -- (above the game's Options window, which has a button for it)
+        f:SetFrameStrata("FULLSCREEN_DIALOG")
+        f:SetToplevel(true)
+        f:SetClampedToScreen(true)
+        f:EnableMouse(true)
+        f:SetMovable(true)
+        if f.SetBackdrop then
+            f:SetBackdrop(LINE)
+            f:SetBackdropColor(C.bg[1], C.bg[2], C.bg[3], 0.97)
+            f:SetBackdropBorderColor(C.border[1], C.border[2], C.border[3], 1)
+        end
+        if type(UISpecialFrames) == "table" then table.insert(UISpecialFrames, "EzWoWShareSettings") end
+
+        -- the header band: icon, name, what it is for, close (dragged by it)
+        local top = CreateFrame("Frame", nil, f, "BackdropTemplate")
+        top:SetPoint("TOPLEFT", f, "TOPLEFT", 1, -1)
+        top:SetPoint("TOPRIGHT", f, "TOPRIGHT", -1, -1)
+        top:SetHeight(56)
+        if top.SetBackdrop then
+            top:SetBackdrop({ bgFile = WHITE })
+            top:SetBackdropColor(C.bg2[1], C.bg2[2], C.bg2[3], 0.96)
+        end
+        top:EnableMouse(true)
+        top:RegisterForDrag("LeftButton")
+        top:SetScript("OnDragStart", function() f:StartMoving() end)
+        top:SetScript("OnDragStop", function() f:StopMovingOrSizing() end)
+        local accentLine = top:CreateTexture(nil, "ARTWORK")
+        accentLine:SetColorTexture(C.accent[1], C.accent[2], C.accent[3], 0.95)
+        accentLine:SetPoint("BOTTOMLEFT", top, "BOTTOMLEFT", 0, 0)
+        accentLine:SetPoint("BOTTOMRIGHT", top, "BOTTOMRIGHT", 0, 0)
+        accentLine:SetHeight(2)
+        local icon = top:CreateTexture(nil, "ARTWORK")
+        icon:SetSize(28, 28)
+        icon:SetPoint("TOPLEFT", 14, -14)
+        icon:SetTexture(ICON)
+        local heading = top:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+        heading:SetPoint("TOPLEFT", 48, -11)
+        heading:SetTextColor(C.accent[1], C.accent[2], C.accent[3])
+        heading:SetText(SHARE_TITLE)
+        local sub = top:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        sub:SetPoint("TOPLEFT", heading, "BOTTOMLEFT", 0, -3)
+        sub:SetWidth(330)
+        sub:SetJustifyH("LEFT")
+        sub:SetTextColor(C.muted[1], C.muted[2], C.muted[3])
+        settingsUI.sub = sub
+        local close = flatButton(top, 24, 24, false, function() f:Hide() end)
+        close:SetPoint("TOPRIGHT", top, "TOPRIGHT", -10, -10)
+        close:SetFrameLevel((top:GetFrameLevel() or 1) + 3)
+        close:SetText("X")
+
+        -- the switches, each with what it does under its name
+        settingsUI.rows = {}
+        for i, spec in ipairs(settingsChecks()) do
+            local check = CreateFrame("CheckButton", nil, f, "UICheckButtonTemplate")
+            check:SetSize(24, 24)
+            local label = check:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+            label:SetPoint("TOPLEFT", check, "TOPRIGHT", 2, -5)
+            label:SetJustifyH("LEFT")
+            local help = check:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+            help:SetPoint("TOPLEFT", label, "BOTTOMLEFT", 0, -3)
+            help:SetJustifyH("LEFT")
+            check:SetScript("OnClick", function(self)
+                pcall(spec[4], self:GetChecked() and true or false)
+                lib.RefreshSettings()
+            end)
+            settingsUI.rows[i] = { check = check, label = label, help = help, spec = spec }
+        end
+
+        local foot = f:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+        foot:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -20, 10)
+        foot:SetTextColor(C.muted[1], C.muted[2], C.muted[3])
+        foot:SetText(SHARE_TITLE .. " · /ezshare")
+
+        f:SetScript("OnShow", function()
+            -- (the texts in the language of the moment)
+            settingsUI.sub:SetText(T("setSub"))
+            layout()
+            lib.RefreshSettings()
+        end)
+        settingsUI.frame = f
+        -- moved through with the gamepad as well, also over the game's Options window
+        local pad = _G.EzWoW_GamePad
+        if type(pad) == "table" and type(pad.RegisterWindow) == "function" then
+            pcall(pad.RegisterWindow, f, { modal = true })
+        end
+        -- (taller than the screen: shrunk to fit)
+        if type(pad) == "table" and type(pad.KeepOnScreen) == "function" then pcall(pad.KeepOnScreen, f) end
+        return f
+    end
+
+    -- toggle: a second call closes it
+    function lib.OpenSettings(toggle)
+        local f = buildSettings()
+        if toggle and f:IsShown() then
+            f:Hide()
+            return
+        end
+        f:Show()
+    end
+
+    -- The game's Options > AddOns page, as the other EzWoW addons have it: the
+    -- icon and name, a short text, a button for the window and a hint
+    function lib.RegisterSettings()
+        local S = _G.Settings
+        if lib.settingsCategory or type(S) ~= "table" or type(S.RegisterCanvasLayoutCategory) ~= "function"
+            or type(S.RegisterAddOnCategory) ~= "function" then
+            return
+        end
+        local panel = CreateFrame("Frame", "EzWoWShareOptionsPanel", UIParent)
+        panel.name = SHARE_TITLE
+        local icon = panel:CreateTexture(nil, "ARTWORK")
+        icon:SetSize(32, 32)
+        icon:SetPoint("TOPLEFT", 18, -18)
+        icon:SetTexture(ICON)
+        local heading = panel:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
+        heading:SetPoint("LEFT", icon, "RIGHT", 10, 0)
+        heading:SetTextColor(C.accent[1], C.accent[2], C.accent[3])
+        heading:SetText(SHARE_TITLE)
+        local desc = panel:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+        desc:SetPoint("TOPLEFT", icon, "BOTTOMLEFT", 0, -14)
+        desc:SetWidth(520)
+        desc:SetJustifyH("LEFT")
+        local open = flatButton(panel, 220, 28, true, function() lib.OpenSettings() end)
+        open:SetPoint("TOPLEFT", desc, "BOTTOMLEFT", 0, -18)
+        local hint = panel:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+        hint:SetPoint("TOPLEFT", open, "BOTTOMLEFT", 0, -14)
+        hint:SetTextColor(C.muted[1], C.muted[2], C.muted[3])
+        local function texts()
+            desc:SetText(T("setIntro"))
+            open:SetText(T("setOpen"))
+            hint:SetText(T("setHint"))
+        end
+        panel:SetScript("OnShow", texts)
+        texts()
+        local ok, category = pcall(S.RegisterCanvasLayoutCategory, panel, SHARE_TITLE)
+        if ok and category then
+            pcall(S.RegisterAddOnCategory, category)
+            lib.settingsCategory = category
+        end
+    end
+end
+lib.SetupSettings()
+
 function lib.Slash(msg)
     local raw = type(msg) == "string" and msg:gsub("^%s+", ""):gsub("%s+$", "") or ""
     msg = raw:lower()
-    if (msg == "" or msg == "window" or msg == "창") and lib.ToggleWindow then
+    if not lib.DevMode() then
+        -- players: the settings window; the switches by name work too, without chat replies
+        if msg == "on" or msg == "off" then
+            lib.SetEnabled(msg == "on")
+        elseif msg == "channel on" or msg == "channel off" then
+            lib.SetEnabled(lib.IsEnabled(), msg == "channel on")
+        elseif msg == "tooltip on" or msg == "툴팁 켜기" then
+            lib.SetTooltipLines(true)
+        elseif msg == "tooltip off" or msg == "툴팁 끄기" then
+            lib.SetTooltipLines(false)
+        elseif msg == "tooltip" or msg == "툴팁" then
+            lib.SetTooltipLines(not lib.TooltipLinesOn())
+        elseif msg == "map on" or msg == "지도 켜기" then
+            lib.SetMapMarks(true)
+        elseif msg == "map off" or msg == "지도 끄기" then
+            lib.SetMapMarks(false)
+        elseif msg == "map" or msg == "지도" then
+            lib.SetMapMarks(not lib.MapMarksOn())
+        elseif msg == "map shared on" or msg == "지도 공유 켜기" then
+            lib.SetSharedMarks(true)
+        elseif msg == "map shared off" or msg == "지도 공유 끄기" then
+            lib.SetSharedMarks(false)
+        else
+            lib.OpenSettings(true)
+            return
+        end
+        lib.RefreshSettings()
+        return
+    end
+    -- the developer (the data scanner is loaded): the activity window and the chat replies
+    if msg == "settings" or msg == "설정" then
+        lib.OpenSettings(true)
+    elseif (msg == "" or msg == "window" or msg == "창") and lib.ToggleWindow then
         lib.ToggleWindow()
     elseif msg == "ping" or msg:find("^ping%s") then
         lib.Ping((raw:match("^%S+%s+(.+)$")))
@@ -4332,10 +4716,23 @@ function lib.Slash(msg)
         elseif msg == "tooltip off" or msg == "툴팁 끄기" then on = false end
         lib.SetTooltipLines(on)
         say(on and T("tipLinesOn") or T("tipLinesOff"))
+    elseif msg == "map" or msg == "map on" or msg == "map off"
+        or msg == "지도" or msg == "지도 켜기" or msg == "지도 끄기" then
+        local on = not lib.MapMarksOn()
+        if msg == "map on" or msg == "지도 켜기" then on = true
+        elseif msg == "map off" or msg == "지도 끄기" then on = false end
+        lib.SetMapMarks(on)
+        say(on and T("mapOn") or T("mapOff"))
+    elseif msg == "map shared on" or msg == "map shared off" or msg == "지도 공유 켜기" or msg == "지도 공유 끄기" then
+        local on = msg == "map shared on" or msg == "지도 공유 켜기"
+        lib.SetSharedMarks(on)
+        say(on and T("sharedMarksOn") or T("sharedMarksOff"))
     elseif msg == "status" then
         say(lib.IsEnabled() and T("on") or T("off"))
         if lib.IsEnabled() then say(lib.UsesChannel() and T("channelOn") or T("channelOff")) end
         say(lib.TooltipLinesOn() and T("tipLinesOn") or T("tipLinesOff"))
+        say(lib.MapMarksOn() and T("mapOn") or T("mapOff"))
+        if lib.MapMarksOn() then say(lib.SharedMarksOn() and T("sharedMarksOn") or T("sharedMarksOff")) end
         say(format(T("status"), counts()))
         say(format(T("applied"), counts(true)))
         local stats = lib.stats
@@ -5359,13 +5756,16 @@ local function setupWindow()
         return f
     end
 
+    -- (the developer's window: players get the settings page, see lib.DevMode)
     function lib.ToggleWindow()
+        if not lib.DevMode() then return lib.OpenSettings() end
         local f = ui.frame or build()
         if f:IsShown() then f:Hide() else f:Show() end
     end
 
     -- tab: "recv", "people", "sent" or "kinds" (optional)
     function lib.OpenWindow(tab)
+        if not lib.DevMode() then return lib.OpenSettings() end
         local f = ui.frame or build()
         if TAB_TITLES[tab] then
             ui.tab = tab
@@ -5394,19 +5794,13 @@ local function ownTooltip(tip)
     return tip == _G.GameTooltip or tip == _G.ItemRefTooltip
 end
 
--- The "EzWoW - <addon>" name line under the lines added here: the Tooltip
--- addon's name when it is loaded (item and unit tooltips are its part),
--- else the addon whose copy of this library runs
+-- The "EzWoW - <name>" line under the lines added here: the Tooltip addon's
+-- name when it is loaded (item and unit tooltips are its part), else the
+-- sharing's own name, which its settings page carries too (not the addon
+-- whose copy of this library runs: that may have nothing to do with items)
 local function tagText()
     if lib.hosts and lib.hosts["EzWoW-Tooltip"] then return "EzWoW - Tooltip" end
-    local title
-    local getMeta = (C_AddOns and C_AddOns.GetAddOnMetadata) or _G.GetAddOnMetadata
-    if type(getMeta) == "function" and lib.owner then
-        local ok, t = pcall(getMeta, lib.owner, "Title")
-        if ok and type(t) == "string" then title = t:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "") end
-    end
-    if type(title) == "string" and title:find("^EzWoW %- ") then return title end
-    return "EzWoW"
+    return lib.SHARE_TITLE
 end
 
 local function addTag(tip)
@@ -5716,6 +6110,7 @@ function lib.OnEvent(event, ...)
         if C_ChatInfo and C_ChatInfo.RegisterAddonMessagePrefix then
             pcall(C_ChatInfo.RegisterAddonMessagePrefix, PREFIX)
         end
+        if lib.RegisterSettings then pcall(lib.RegisterSettings) end
     elseif event == "GROUP_JOINED" then
         if lib.SyncGroupJoined then lib.SyncGroupJoined() end
     elseif event == "PLAYER_ENTERING_WORLD" and not lib.started then

@@ -3,6 +3,15 @@
 -- UI/WorldMapPins.lua : WorldMap Flight Node Pins, Dock Toggle & Faction Filter Popover
 --===========================================================================
 local ADDON_NAME, ns = ...
+-- every EzWoW mark on the maps can be turned off at once, and the marks only
+-- the shared records make apart (Libs/EzWoWShare MapMarksOn / SharedMarksOn)
+local function ezMapOn(sharedOnly)
+    local share = _G.EzWoW_Share
+    local fn = type(share) == "table" and share[sharedOnly and "SharedMarksOn" or "MapMarksOn"]
+    if type(fn) ~= "function" then return true end
+    local ok, on = pcall(fn)
+    return not ok or on ~= false
+end
 -- frames made on the World Map are made without a parent and put in after
 -- (Libs/EzWoWGamePad MakeFrame: keeps the game's gamepad cursor untainted)
 local CreateFrame = (ns.GamePad and ns.GamePad.MakeFrame) or CreateFrame
@@ -79,6 +88,12 @@ local factionToggles = {}
 
 function WorldMapPinProvider.isFeatureEnabled()
     return EzWoW_FlightMapDB and EzWoW_FlightMapDB.worldMapFlights ~= false
+end
+
+-- our flight pins drawn (instead of the game's): not while every EzWoW mark on
+-- the maps is turned off, the game's own flight pins come back then
+function WorldMapPinProvider.drawsPins()
+    return WorldMapPinProvider.isFeatureEnabled() and ezMapOn()
 end
 
 function WorldMapPinProvider.hasAutoAlign()
@@ -676,7 +691,7 @@ local STOCK_PIN = "FlightPointPinTemplate"
 local stockMouse = setmetatable({}, { __mode = "k" })
 function WorldMapPinProvider.applyStockPins()
     if not (WorldMapFrame and WorldMapFrame.EnumeratePinsByTemplate) then return end
-    local hide = WorldMapPinProvider.isFeatureEnabled()
+    local hide = WorldMapPinProvider.drawsPins()
     local mouseOk = not InCombatLockdown()
     WorldMapPinProvider.stockMousePending = not mouseOk
     for pin in WorldMapFrame:EnumeratePinsByTemplate(STOCK_PIN) do
@@ -711,7 +726,7 @@ function WorldMapPinProvider.installWorldMapPinProvider()
     end
     function WorldMapDataProvider:RefreshAllData()
         self:RemoveAllData()
-        if not WorldMapPinProvider.isFeatureEnabled() then return end
+        if not WorldMapPinProvider.drawsPins() then return end
         for _, entry in ipairs(WorldMapPinProvider.collectMatchingEntries(self:GetMap():GetMapID())) do
             if WorldMapPinProvider.presentFaction(entry.node.faction) then
                 acquirePin(self:GetMap(), PIN, entry)
@@ -776,3 +791,14 @@ events:SetScript("OnEvent", function(_, event, name)
 end)
 
 _G.EzWoWFlightMapPinMixin = EzWoWFlightMapPinMixin
+
+-- the EzWoW map marks turned on or off (Libs/EzWoWShare settings window)
+do
+    local share = _G.EzWoW_Share
+    if type(share) == "table" and type(share.RegisterCallback) == "function" then
+        share.RegisterCallback("EzWoW-FlightMap-Marks", function(kinds)
+            if type(kinds) ~= "table" or not kinds.mapMarks then return end
+            if ns.RefreshWorldMap then pcall(ns.RefreshWorldMap) end
+        end)
+    end
+end

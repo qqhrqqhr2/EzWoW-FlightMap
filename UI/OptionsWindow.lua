@@ -435,6 +435,8 @@ end
 switchSettingsPopup = function()
     if not settingsPopoverFrame then
         settingsPopoverFrame = CreateFrame("Frame", "EzWoWFlightMapSettings", UIParent, BackdropTemplateMixin and "BackdropTemplate" or nil)
+        -- (taller than the screen: shrunk to fit, Libs/EzWoWGamePad)
+        if ns.GamePad and ns.GamePad.KeepOnScreen then ns.GamePad.KeepOnScreen(settingsPopoverFrame) end
         settingsPopoverFrame:SetFrameStrata("FULLSCREEN_DIALOG")
         settingsPopoverFrame:SetToplevel(true)
         settingsPopoverFrame:SetClampedToScreen(true)
