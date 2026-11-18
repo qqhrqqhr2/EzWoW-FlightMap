@@ -404,7 +404,8 @@ local function worldToContinent(cont, wx, wy, continentID)
 end
 
 local function questDone(questID)
-    for _, fn in ipairs({ C_QuestLog and C_QuestLog.ReadyForTurnIn, C_QuestLog and C_QuestLog.IsComplete }) do
+    -- (false, not nil, for a missing function: ipairs stops at a nil entry)
+    for _, fn in ipairs({ (C_QuestLog and C_QuestLog.ReadyForTurnIn) or false, (C_QuestLog and C_QuestLog.IsComplete) or false }) do
         local ok, v = call(fn, questID)
         if ok and v == true then return true end
     end

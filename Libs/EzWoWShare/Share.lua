@@ -39,7 +39,7 @@ local ADDON_NAME, ns = ...
 local type, pairs, ipairs, tonumber, tostring, pcall, next = type, pairs, ipairs, tonumber, tostring, pcall, next
 local floor, format, concat, max, min = math.floor, string.format, table.concat, math.max, math.min
 
-local LIB_VERSION = 17
+local LIB_VERSION = 18
 
 -- one table for every copy (a newer copy updates the functions in it)
 local lib = _G.EzWoW_Share
@@ -97,8 +97,12 @@ local TEXTS = {
         mapOff = "Maps do not show any EzWoW marks.",
         sharedMarksOn = "Maps show the marks made from shared records.",
         sharedMarksOff = "Maps do not show the marks made from shared records.",
-        help = "/ezshare (window) | settings | on | off | channel on | channel off | tooltip on | tooltip off | map on | map off | map shared on | map shared off | status | roster | ping [name]",
-        helpUser = "/ezshare (settings) | on | off | channel on | channel off | tooltip on | tooltip off | map on | map off | map shared on | map shared off",
+        arrowOn = "The arrow window on screen is shown.",
+        arrowOff = "The arrow window on screen is hidden (the map pin stays).",
+        mapArrowOn = "The arrows on the world map are shown.",
+        mapArrowOff = "The arrows on the world map are hidden.",
+        help = "/ezshare (window) | settings | on | off | channel on | channel off | tooltip on | tooltip off | map on | map off | map shared on | map shared off | arrow on | arrow off | map arrow on | map arrow off | status | roster | ping [name]",
+        helpUser = "/ezshare (settings) | on | off | channel on | channel off | tooltip on | tooltip off | map on | map off | map shared on | map shared off | arrow on | arrow off | map arrow on | map arrow off",
         setShare = "Share records with other EzWoW players",
         setShareTip = "Swaps what you saw in the game (vendors, drops, quest NPCs, rare monsters, gathering spots) with other EzWoW players. Off: nothing is sent or received.",
         setChannel = "Share with the whole server",
@@ -106,7 +110,7 @@ local TEXTS = {
         setTips = "Show EzWoW info on tooltips",
         setTipsTip = "Off: hides every line the EzWoW addons add to the game's tooltips (items, monsters, spells...) and their EzWoW - ... labels. The settings of each addon stay as they are.",
         settingsWhere = "Settings: Game Menu > Options > AddOns > EzWoW - Data Sharing",
-        setIntro = "Settings for every EzWoW addon at once: sharing what you find with other players, the EzWoW info on tooltips and the EzWoW marks on maps.",
+        setIntro = "Settings for every EzWoW addon at once: sharing what you find with other players, the EzWoW info on tooltips, the EzWoW marks on maps and the tracking arrows.",
         setOpen = "Settings (/ezshare)",
         setHint = "Type /ezshare in chat to open the settings too.",
         setSub = "Settings for every EzWoW addon",
@@ -114,6 +118,10 @@ local TEXTS = {
         setMapTip = "Off: hides every mark the EzWoW addons put on the world map and the minimap (quest ! and ?, objectives, NPC and gathering spots, boats and zone exits, dungeon entrances, flight masters, fishing spots). Search results you ask for and the buttons on the map stay.",
         setShared = "Marks made from shared records",
         setSharedTip = "Off: hides only the marks sharing adds on its own (zone exits, shared herb and ore spots, other players' fishing spots). Quest and NPC spots keep using the shared records.",
+        setArrow = "Arrow window on screen",
+        setArrowTip = "The small window with an arrow and the distance that shows while a pin is set on the map. Off: the window is hidden; the pin on the map stays.",
+        setMapArrow = "Arrows on the world map",
+        setMapArrowTip = "The bouncing arrows on the world map at a search result or a quest guide spot. Off: no arrows on the map; the pin and the arrow window stay as they are.",
         status = "Records: quests %d, rare sightings %d, drop sources %d, gathering spots %d.",
         applied = "Of these, received from other players and in use: quests %d, rare sightings %d, drop sources %d, gathering spots %d.",
         traffic = "This session: %d records received from %d players, %d messages sent.",
@@ -210,8 +218,12 @@ local TEXTS = {
         mapOff = "지도에 EzWoW 표시를 보여 주지 않습니다.",
         sharedMarksOn = "지도에 공유 기록으로 생긴 표시를 보여 줍니다.",
         sharedMarksOff = "지도에 공유 기록으로 생긴 표시를 보여 주지 않습니다.",
-        help = "/ezshare (창 열기) | settings | on | off | channel on | channel off | tooltip on | tooltip off | map on | map off | map shared on | map shared off | status | roster | ping [이름]  (/공유, /공유 툴팁 켜기·끄기, /공유 지도 켜기·끄기, /공유 지도 공유 켜기·끄기)",
-        helpUser = "/ezshare (설정 열기) | on | off | channel on | channel off | tooltip on | tooltip off | map on | map off | map shared on | map shared off  (/공유, /공유 툴팁 켜기·끄기, /공유 지도 켜기·끄기, /공유 지도 공유 켜기·끄기)",
+        arrowOn = "화면의 추적 화살표 창을 보여 줍니다.",
+        arrowOff = "화면의 추적 화살표 창을 숨깁니다 (지도의 핀은 그대로).",
+        mapArrowOn = "세계 지도의 위치 화살표를 보여 줍니다.",
+        mapArrowOff = "세계 지도의 위치 화살표를 숨깁니다.",
+        help = "/ezshare (창 열기) | settings | on | off | channel on | channel off | tooltip on | tooltip off | map on | map off | map shared on | map shared off | arrow on | arrow off | map arrow on | map arrow off | status | roster | ping [이름]  (/공유, /공유 툴팁 켜기·끄기, /공유 지도 켜기·끄기, /공유 지도 공유 켜기·끄기, /공유 화살표 켜기·끄기, /공유 지도 화살표 켜기·끄기)",
+        helpUser = "/ezshare (설정 열기) | on | off | channel on | channel off | tooltip on | tooltip off | map on | map off | map shared on | map shared off | arrow on | arrow off | map arrow on | map arrow off  (/공유, /공유 툴팁 켜기·끄기, /공유 지도 켜기·끄기, /공유 지도 공유 켜기·끄기, /공유 화살표 켜기·끄기, /공유 지도 화살표 켜기·끄기)",
         setShare = "다른 EzWoW 사용자와 기록 공유",
         setShareTip = "게임하며 본 상인·드롭·퀘스트 NPC·희귀 몬스터·채집 위치를 다른 EzWoW 사용자와 주고받습니다. 끄면 보내지도 받지도 않습니다.",
         setChannel = "같은 서버 전체와 공유",
@@ -219,7 +231,7 @@ local TEXTS = {
         setTips = "툴팁에 EzWoW 정보 표시",
         setTipsTip = "끄면 EzWoW 애드온들이 게임 툴팁(아이템·몬스터·주문 등)에 붙이는 줄과 EzWoW - … 이름표를 모두 숨깁니다. 각 애드온의 설정은 그대로입니다.",
         settingsWhere = "설정: 게임 메뉴 > 설정 > 애드온 > EzWoW - Data Sharing",
-        setIntro = "모든 EzWoW 애드온에 함께 적용되는 설정입니다: 다른 사용자와 기록 공유, 툴팁의 EzWoW 정보, 지도의 EzWoW 표시.",
+        setIntro = "모든 EzWoW 애드온에 함께 적용되는 설정입니다: 다른 사용자와 기록 공유, 툴팁의 EzWoW 정보, 지도의 EzWoW 표시, 추적 화살표.",
         setOpen = "설정 (/ezshare)",
         setHint = "채팅창에 /ezshare 를 입력해도 열립니다.",
         setSub = "모든 EzWoW 애드온에 함께 적용되는 설정",
@@ -227,6 +239,10 @@ local TEXTS = {
         setMapTip = "끄면 EzWoW 애드온들이 세계 지도·미니맵에 찍는 표시(퀘스트 !·?, 목표 위치, NPC·채집 위치, 교통편·지역 입구, 던전 입구, 비행 조련사, 낚시터)를 모두 숨깁니다. 직접 검색한 결과와 지도 위 버튼은 그대로입니다.",
         setShared = "공유 기록으로 생긴 표시",
         setSharedTip = "끄면 공유 기능으로 따로 생기는 표시(지역 입구, 공유된 약초·광석 위치, 다른 사용자 낚시터)만 숨깁니다. 퀘스트·NPC 위치는 그대로 공유 기록을 섞어 보여 줍니다.",
+        setArrow = "화면의 추적 화살표 창",
+        setArrowTip = "지도에 추적 핀이 있을 때 뜨는 화살표·거리 창입니다. 끄면 이 창만 숨기고 지도의 핀은 그대로 둡니다.",
+        setMapArrow = "세계 지도의 위치 화살표",
+        setMapArrowTip = "검색 결과나 퀘스트 길 안내 때 세계 지도에 뜨는 튀는 화살표입니다. 끄면 지도에 화살표를 그리지 않고, 추적 핀과 화면의 화살표 창은 그대로 둡니다.",
         status = "기록: 퀘스트 %d, 희귀 몬스터 목격 %d, 드롭 출처 %d, 채집 위치 %d.",
         applied = "그중 다른 사람에게 받아 쓰고 있는 것: 퀘스트 %d, 희귀 몬스터 목격 %d, 드롭 출처 %d, 채집 위치 %d.",
         traffic = "이번 접속: 받은 기록 %d개 (보낸 사람 %d명), 보낸 메시지 %d개.",
@@ -600,6 +616,27 @@ end
 function lib.SetSharedMarks(on)
     settings().noSharedMarks = not on or nil
     for _, fn in pairs(lib.callbacks or {}) do pcall(fn, { mapMarks = true }) end
+end
+-- The arrow window toward the map pin (Libs/EzWoWWaypointArrow v5+ reads
+-- settings.noArrow, next to the arrow look it keeps there): off hides the
+-- window only, the game's pin stays.
+function lib.ArrowOn() return settings().noArrow ~= true end
+function lib.SetArrow(on)
+    settings().noArrow = not on or nil
+    local arrow = _G.EzWoW_WaypointArrow
+    if type(arrow) == "table" and type(arrow.Refresh) == "function" then pcall(arrow.Refresh) end
+    -- one state everywhere: this window and Map Finder's options show the change at once
+    if lib.RefreshSettings then pcall(lib.RefreshSettings) end
+    for _, fn in pairs(lib.callbacks or {}) do pcall(fn, { arrow = true }) end
+end
+-- The arrows Map Finder draws on the world map at a search result or a quest
+-- guide spot (it redraws on the notice { mapArrow = true }); the pin and the
+-- arrow window are not touched.
+function lib.MapArrowOn() return settings().noMapArrow ~= true end
+function lib.SetMapArrow(on)
+    settings().noMapArrow = not on or nil
+    if lib.RefreshSettings then pcall(lib.RefreshSettings) end
+    for _, fn in pairs(lib.callbacks or {}) do pcall(fn, { mapArrow = true }) end
 end
 -- kind "unit": rare sightings on unit tooltips; else item tooltip lines
 function lib.ShowsTooltips(kind)
@@ -4460,6 +4497,15 @@ function lib.SetupSettings()
                 function(on) lib.SetMapMarks(on) end, nil, anyLoaded(MAP_HOSTS) },
             { "setShared", "setSharedTip", function() return settings().noSharedMarks ~= true end,
                 function(on) lib.SetSharedMarks(on) end, function() return lib.MapMarksOn() end, anyLoaded(MAP_HOSTS) },
+            { "setArrow", "setArrowTip", function() return lib.ArrowOn() end,
+                function(on) lib.SetArrow(on) end, nil, function()
+                    local arrow = _G.EzWoW_WaypointArrow
+                    return type(arrow) == "table" and (tonumber(arrow.version) or 0) >= 5
+                end },
+            { "setMapArrow", "setMapArrowTip", function() return lib.MapArrowOn() end,
+                function(on) lib.SetMapArrow(on) end, nil, function()
+                    return lib.callbacks ~= nil and lib.callbacks["EzWoW-MapFinder-Arrow"] ~= nil
+                end },
         }
     end
 
@@ -4683,6 +4729,18 @@ function lib.Slash(msg)
             lib.SetSharedMarks(true)
         elseif msg == "map shared off" or msg == "지도 공유 끄기" then
             lib.SetSharedMarks(false)
+        elseif msg == "arrow on" or msg == "화살표 켜기" then
+            lib.SetArrow(true)
+        elseif msg == "arrow off" or msg == "화살표 끄기" then
+            lib.SetArrow(false)
+        elseif msg == "arrow" or msg == "화살표" then
+            lib.SetArrow(not lib.ArrowOn())
+        elseif msg == "map arrow on" or msg == "지도 화살표 켜기" then
+            lib.SetMapArrow(true)
+        elseif msg == "map arrow off" or msg == "지도 화살표 끄기" then
+            lib.SetMapArrow(false)
+        elseif msg == "map arrow" or msg == "지도 화살표" then
+            lib.SetMapArrow(not lib.MapArrowOn())
         else
             lib.OpenSettings(true)
             return
@@ -4727,12 +4785,28 @@ function lib.Slash(msg)
         local on = msg == "map shared on" or msg == "지도 공유 켜기"
         lib.SetSharedMarks(on)
         say(on and T("sharedMarksOn") or T("sharedMarksOff"))
+    elseif msg == "arrow" or msg == "arrow on" or msg == "arrow off"
+        or msg == "화살표" or msg == "화살표 켜기" or msg == "화살표 끄기" then
+        local on = not lib.ArrowOn()
+        if msg == "arrow on" or msg == "화살표 켜기" then on = true
+        elseif msg == "arrow off" or msg == "화살표 끄기" then on = false end
+        lib.SetArrow(on)
+        say(on and T("arrowOn") or T("arrowOff"))
+    elseif msg == "map arrow" or msg == "map arrow on" or msg == "map arrow off"
+        or msg == "지도 화살표" or msg == "지도 화살표 켜기" or msg == "지도 화살표 끄기" then
+        local on = not lib.MapArrowOn()
+        if msg == "map arrow on" or msg == "지도 화살표 켜기" then on = true
+        elseif msg == "map arrow off" or msg == "지도 화살표 끄기" then on = false end
+        lib.SetMapArrow(on)
+        say(on and T("mapArrowOn") or T("mapArrowOff"))
     elseif msg == "status" then
         say(lib.IsEnabled() and T("on") or T("off"))
         if lib.IsEnabled() then say(lib.UsesChannel() and T("channelOn") or T("channelOff")) end
         say(lib.TooltipLinesOn() and T("tipLinesOn") or T("tipLinesOff"))
         say(lib.MapMarksOn() and T("mapOn") or T("mapOff"))
         if lib.MapMarksOn() then say(lib.SharedMarksOn() and T("sharedMarksOn") or T("sharedMarksOff")) end
+        say(lib.ArrowOn() and T("arrowOn") or T("arrowOff"))
+        say(lib.MapArrowOn() and T("mapArrowOn") or T("mapArrowOff"))
         say(format(T("status"), counts()))
         say(format(T("applied"), counts(true)))
         local stats = lib.stats
