@@ -1,7 +1,7 @@
-# v2.0.26
+# v2.0.27
 
 ### 한국어
-- 비행 지도의 퀘스트 완료 표시가 일부 경우에 빠질 수 있던 문제를 고쳤습니다.
+- 접속 직후 공유용 채널이 공개 채널의 번호(1번)를 차지할 수 있던 문제를 고쳤습니다.
 
 ### English
-- Fixed quest turn-in marks on the flight map that could be missing in some cases.
+- Fixed the data-sharing channel possibly taking General's number (1) right after login.
