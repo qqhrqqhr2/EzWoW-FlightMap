@@ -39,7 +39,7 @@ local ADDON_NAME, ns = ...
 local type, pairs, ipairs, tonumber, tostring, pcall, next = type, pairs, ipairs, tonumber, tostring, pcall, next
 local floor, format, concat, max, min = math.floor, string.format, table.concat, math.max, math.min
 
-local LIB_VERSION = 18
+local LIB_VERSION = 19
 
 -- one table for every copy (a newer copy updates the functions in it)
 local lib = _G.EzWoW_Share
@@ -4161,6 +4161,24 @@ local function leaveByName(name)
     if channelIndex(name) and type(LeaveChannelByName) == "function" then pcall(LeaveChannelByName, name) end
 end
 
+-- true when the game's General channel ("공개 - 오그리마") is in. It often comes
+-- in after Trade; a placeholder joined before it takes number 1, and General
+-- drops out of the player's channel list for good.
+function lib.GeneralChannelIn()
+    local names = { "공개", "general", "allgemein", "général", "geral", "generale", "общий", "Общий", "综合", "綜合" }
+    for index = 1, MAX_SLOT do
+        local ok, id, name = pcall(GetChannelName, index)
+        if ok and type(id) == "number" and not isSecret(id) and id == index
+            and type(name) == "string" and not isSecret(name) then
+            local base = (name:match("^(.-)%s+%-%s") or name):lower():gsub("%s+", "")
+            for _, word in ipairs(names) do
+                if base == word then return true end
+            end
+        end
+    end
+    return false
+end
+
 -- records of a kind no addon here took were passed by (and the logs moved on):
 -- once an addon that takes that kind is loaded, every log is taken from the
 -- start again (once)
@@ -4289,6 +4307,13 @@ function lib.JoinChannel()
         later(1, removeFromChatWindows)
         later(3, requestRoster)
         if lib.SyncChannelReady then lib.SyncChannelReady() end
+        return
+    end
+    -- placeholders take the lowest free numbers: General first (a minute at most,
+    -- for a player who left it)
+    if not lib.GeneralChannelIn() and (lib.generalWaits or 0) < 12 then
+        lib.generalWaits = (lib.generalWaits or 0) + 1
+        later(5, lib.JoinChannel)
         return
     end
     relocate()
