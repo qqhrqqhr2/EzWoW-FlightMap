@@ -39,7 +39,7 @@ local ADDON_NAME, ns = ...
 local type, pairs, ipairs, tonumber, tostring, pcall, next = type, pairs, ipairs, tonumber, tostring, pcall, next
 local floor, format, concat, max, min = math.floor, string.format, table.concat, math.max, math.min
 
-local LIB_VERSION = 19
+local LIB_VERSION = 21
 
 -- one table for every copy (a newer copy updates the functions in it)
 local lib = _G.EzWoW_Share
@@ -509,6 +509,9 @@ do
             lib.settingsAt, lib.settingsSnap = at, asText(cur, 0)
         end
         merge(data, shape(saved), 0)
+        -- the lookups made from the records are built again (not there yet
+        -- while this file loads)
+        if lib.LookupsChanged then lib.LookupsChanged() end
         return true
     end
 
@@ -680,12 +683,141 @@ function lib.RegisterCallback(owner, fn)
     if type(fn) == "function" then lib.callbacks[owner] = fn end
 end
 
+-----------------------------------------------------------------------------
+-- Work spread over frames. The game stops an addon script that runs too long
+-- (in combat about 0.1 s for all addons together in one frame), so big
+-- lookups are built a few milliseconds per frame, never inside a tooltip.
+-- lib.Background(key, fn, done, nowMs): fn runs as a job (one per key at a
+-- time), done(ok, err) when it ends. With nowMs it starts at once for that
+-- long. Back: true = done already, false = waits for its frames, nil = not
+-- taken (a job of that key runs already). Inside a job, lib.Pause(weight)
+-- hands the frame back once the time is used (weight: how big the step was).
+-----------------------------------------------------------------------------
+do
+    local BUDGET_MS = 3
+    local queue, byKey = {}, {}
+    local running, deadline, steps = nil, 0, 0
+
+    local function clockMs()
+        if type(debugprofilestop) == "function" then return debugprofilestop() end
+        return clock() * 1000
+    end
+
+    function lib.Pause(weight)
+        if not running or coroutine.running() ~= running then return end
+        steps = steps + (tonumber(weight) or 1)
+        if steps >= 32 then
+            steps = 0
+            if clockMs() > deadline then coroutine.yield() end
+        end
+    end
+
+    -- true: the job ended (done or failed)
+    local function runJob(job, untilMs)
+        running, deadline, steps = job.co, untilMs, 0
+        local ok, err = coroutine.resume(job.co)
+        running = nil
+        if ok and coroutine.status(job.co) ~= "dead" then return false end
+        for i, j in ipairs(queue) do
+            if j == job then
+                table.remove(queue, i)
+                break
+            end
+        end
+        byKey[job.key] = nil
+        if job.done then pcall(job.done, ok, err) end
+        if not ok and geterrorhandler then pcall(geterrorhandler(), err) end
+        return true
+    end
+
+    local frame = CreateFrame("Frame")
+    frame:Hide()
+    frame:SetScript("OnUpdate", function(self)
+        local untilMs = clockMs() + BUDGET_MS
+        local turns = 0
+        while queue[1] and turns < 20 and clockMs() < untilMs do
+            turns = turns + 1
+            runJob(queue[1], untilMs)
+        end
+        if not queue[1] then self:Hide() end
+    end)
+    lib.jobFrame = frame
+
+    function lib.Background(key, fn, done, nowMs)
+        if byKey[key] or type(fn) ~= "function" then return nil end
+        local job = { key = key, co = coroutine.create(fn), done = done }
+        byKey[key] = job
+        queue[#queue + 1] = job
+        if tonumber(nowMs) and not running and runJob(job, clockMs() + nowMs) then return true end
+        frame:Show()
+        return false
+    end
+
+    function lib.BackgroundBusy(key)
+        return byKey[key] ~= nil
+    end
+
+    ---------------------------------------------------------------------------
+    -- Lookups made from all the records (item -> its sources, shops...). Each
+    -- is built as a job: a reader gets the last one built (nil until the first
+    -- is done). A change in the records marks it, and it is built again a
+    -- moment later (records often come in bursts); meanwhile the old one is
+    -- used. spec: { build = fn -> value, on = { changed kind = true },
+    -- input = fn (the shipped tables it reads: a new one means a new build),
+    -- maxAge = seconds or fn -> seconds }
+    ---------------------------------------------------------------------------
+    local WAIT, RETRY = 2, 60
+    local lookups = {}
+
+    function lib.DefineLookup(name, spec)
+        lookups[name] = spec
+    end
+
+    local function start(name, l)
+        lib.Background("lookup:" .. name, function()
+            l.dirty = false
+            local input = l.input and l.input()
+            local value = l.build()
+            l.value, l.builtFrom, l.builtAt = value, input, clock()
+        end, function(ok)
+            l.pending = false
+            if not ok then l.retryAt = clock() + RETRY end
+        end)
+    end
+
+    function lib.Lookup(name)
+        local l = lookups[name]
+        if not l then return nil end
+        if l.value and not l.dirty then
+            local age = type(l.maxAge) == "function" and l.maxAge(l.value) or l.maxAge
+            if (l.input and l.input() ~= l.builtFrom) or (age and clock() - (l.builtAt or 0) > age) then
+                l.dirty = true
+            end
+        end
+        if (not l.value or l.dirty) and not l.pending and clock() >= (l.retryAt or 0) then
+            l.pending = true
+            if l.value and C_Timer and C_Timer.After then
+                C_Timer.After(WAIT, function() start(name, l) end)
+            else
+                start(name, l)
+            end
+        end
+        return l.value
+    end
+
+    -- kind nil: all of them (saved copies joined)
+    function lib.LookupsChanged(kind)
+        for _, l in pairs(lookups) do
+            if kind == nil or (l.on and l.on[kind]) then l.dirty = true end
+        end
+    end
+end
+
 local pendingKinds = {}
 local function changed(kind)
     activity.seq = activity.seq + 1
     pendingKinds[kind] = true
-    if lib.reverseDrops then lib.reverseDrops = nil end
-    if lib.reverseVendors then lib.reverseVendors = nil end
+    lib.LookupsChanged(kind)
 end
 
 local function flushChanged()
@@ -969,39 +1101,62 @@ function lib.GetRare(npcID)
     return type(r) == "table" and r or nil
 end
 
--- sources an item was looted from: { { src = "n123", own = count|nil }, ... }
-function lib.GetDropSources(itemID)
-    itemID = tonumber(itemID)
-    if not itemID then return nil end
-    if not lib.reverseDrops then
+-- itemID -> { src, ... }: the sources this character and other players looted
+-- it from, then the shipped records the player does not have yet
+lib.DefineLookup("drops", {
+    on = { drops = true },
+    input = function() return lib.Seed("drops") end,
+    build = function()
         local rev = {}
-        for src, items in pairs(lib.Data().drops) do
-            if type(items) == "table" then
-                for id, v in pairs(items) do
-                    if type(id) == "number" then
-                        rev[id] = rev[id] or {}
-                        rev[id][#rev[id] + 1] = { src = src, own = type(v) == "number" and v or nil,
-                            shared = v == "s" or nil }
-                    end
+        local function add(id, src)
+            local list = rev[id]
+            if not list then
+                list = {}
+                rev[id] = list
+            end
+            list[#list + 1] = src
+        end
+        local mine = lib.Data().drops
+        -- (the keys first: records may come in while the job waits for a frame)
+        local srcs = {}
+        for src in pairs(mine) do srcs[#srcs + 1] = src end
+        for _, src in ipairs(srcs) do
+            local items = mine[src]
+            if type(src) == "string" and type(items) == "table" then
+                for id in pairs(items) do
+                    if type(id) == "number" then add(id, src) end
                 end
             end
+            lib.Pause()
         end
-        -- shipped records the player does not have yet
-        local mine = lib.Data().drops
         for src, items in pairs(lib.Seed("drops") or {}) do
             if type(src) == "string" and type(items) == "table" then
                 local have = type(mine[src]) == "table" and mine[src] or nil
                 for _, id in ipairs(items) do
-                    if type(id) == "number" and not (have and have[id]) then
-                        rev[id] = rev[id] or {}
-                        rev[id][#rev[id] + 1] = { src = src }
-                    end
+                    if type(id) == "number" and not (have and have[id]) then add(id, src) end
                 end
             end
+            lib.Pause()
         end
-        lib.reverseDrops = rev
+        return rev
+    end,
+})
+
+-- sources an item was looted from: { { src = "n123", own = count|nil, shared = true|nil }, ... }
+-- (nil also while the lookup is being built, a moment after login)
+function lib.GetDropSources(itemID)
+    itemID = tonumber(itemID)
+    if not itemID then return nil end
+    local rev = lib.Lookup("drops")
+    local srcs = rev and rev[itemID]
+    if not srcs then return nil end
+    local mine = lib.Data().drops
+    local out = {}
+    for i, src in ipairs(srcs) do
+        local v = type(mine[src]) == "table" and mine[src][itemID] or nil
+        out[i] = { src = src, own = type(v) == "number" and v or nil, shared = v == "s" or nil }
     end
-    return lib.reverseDrops[itemID]
+    return out
 end
 
 -- Name lookups other addons add: function(kind, id, locale) -> name or nil,
@@ -1761,27 +1916,33 @@ function lib.OnMerchantShow()
     if old ~= table.concat(items, ",") then changed("vendors") end
 end
 
--- itemID -> list of npcIDs that sell it: this character's shops, items
--- confirmed by other players, then the records shipped with the addons.
--- Shops of the other faction are left out (nil when none is left).
-function lib.GetVendors(itemID)
-    itemID = tonumber(itemID)
-    if not itemID then return nil end
-    if not lib.reverseVendors then
-        local rev = {}
+-- { rev = itemID -> { npcID, ... }, others = itemID -> { [npcID] = true } }:
+-- this character's shops, items confirmed by other players (others), then
+-- the records shipped with the addons
+lib.DefineLookup("vendors", {
+    on = { vendors = true },
+    input = function() return lib.Seed("vendors") end,
+    build = function()
+        local rev, seen = {}, {}
         local function add(id, npcID)
+            if type(id) ~= "number" or type(npcID) ~= "number" then return end
+            local key = id * 16777216 + npcID
+            if seen[key] then return end
+            seen[key] = true
             local list = rev[id]
             if not list then
                 list = {}
                 rev[id] = list
             end
-            for _, n in ipairs(list) do
-                if n == npcID then return end
-            end
             list[#list + 1] = npcID
         end
+        local store = vendorStore()
+        -- (the keys first: shop records may come in while the job waits for a frame)
+        local npcs = {}
+        for npcID in pairs(store) do npcs[#npcs + 1] = npcID end
         local ownSeen, fromOthers = {}, {}
-        for npcID, row in pairs(vendorStore()) do
+        for _, npcID in ipairs(npcs) do
+            local row = store[npcID]
             if type(npcID) == "number" and type(row) == "table" then
                 if type(row.own) == "table" then
                     ownSeen[npcID] = true
@@ -1796,16 +1957,28 @@ function lib.GetVendors(itemID)
                     end
                 end
             end
+            lib.Pause()
         end
-        lib.vendorsFromOthers = fromOthers
         for npcID, items in pairs(lib.Seed("vendors") or {}) do
             if type(npcID) == "number" and type(items) == "table" and not ownSeen[npcID] then
                 for _, id in ipairs(items) do add(id, npcID) end
             end
+            lib.Pause()
         end
-        lib.reverseVendors = rev
-    end
-    local list = lib.reverseVendors[itemID]
+        return { rev = rev, others = fromOthers }
+    end,
+})
+
+-- itemID -> list of npcIDs that sell it (see the lookup above; nil also while
+-- it is being built, a moment after login).
+-- Shops of the other faction are left out (nil when none is left).
+function lib.GetVendors(itemID)
+    itemID = tonumber(itemID)
+    if not itemID then return nil end
+    local built = lib.Lookup("vendors")
+    if not built then return nil end
+    lib.vendorsFromOthers = built.others
+    local list = built.rev[itemID]
     if not list or type(lib.IsOtherSide) ~= "function" then return list end
     local out
     for i, npcID in ipairs(list) do
@@ -2560,7 +2733,7 @@ end
 -- The players of the data channel: who gets whispers, whose are taken
 -----------------------------------------------------------------------------
 local ROSTER_EVERY = 60     -- seconds between channel list requests
-local ROSTER_AGAIN = 10     -- a whisper from a player not listed asks again after this long
+local ROSTER_AGAIN = 30     -- a whisper from a player not listed asks again after this long
 local HELD_WAIT = 30        -- such a whisper waits this long for a fresh list
 local HELD_MAX = 40
 local MAX_ROSTER = 500
@@ -2769,6 +2942,22 @@ local function releaseHeld()
     end
 end
 
+-- The channel row chosen before a list request: chosen again once the list is in.
+-- Left on the data channel, the game's chat channel window opened on it and asked
+-- for its long member list again, and the game answered "조금 천천히 하십시오"
+-- (2026-11-22). Not while the player has the window open.
+local restoreTo
+local function restoreSelection()
+    local target = restoreTo
+    restoreTo = nil
+    if not target or type(SetSelectedDisplayChannel) ~= "function" then return end
+    local frame = _G.ChannelFrame
+    if frame and frame.IsShown and frame:IsShown() then return end
+    local display = displayRow()
+    if display and target ~= display then pcall(SetSelectedDisplayChannel, target) end
+end
+lib.RestoreChannelSelection = restoreSelection
+
 -- asks the game for the channel's member list (CHANNEL_ROSTER_UPDATE follows).
 -- Choosing the channel that is chosen already asks for nothing: the game keeps
 -- the list it got then (players who left stay on it, those who came are
@@ -2781,12 +2970,19 @@ local function requestRoster()
     local busy = frame and frame.IsShown and frame:IsShown()
     local asked = false
     if display and type(SetSelectedDisplayChannel) == "function" and not busy then
+        local before
+        if type(GetSelectedDisplayChannel) == "function" then
+            local okS, sel = pcall(GetSelectedDisplayChannel)
+            if okS and type(sel) == "number" and not isSecret(sel) and sel > 0 and sel ~= display then before = sel end
+        end
         local okN, total = pcall(GetNumDisplayChannels)
         if okN and type(total) == "number" and not isSecret(total) then
             for i = 1, min(total, 100) do
                 local ok, _, header = pcall(GetChannelDisplayInfo, i)
                 if i ~= display and ok and not isSecret(header) and not header then
                     asked = pcall(SetSelectedDisplayChannel, i)
+                    -- nothing chosen before (or ours): the first other channel afterwards
+                    restoreTo = before or i
                     break
                 end
             end
@@ -2797,14 +2993,25 @@ local function requestRoster()
         if readRoster() then releaseHeld() end
     elseif C_Timer and C_Timer.After then
         -- the list is on its way (read on CHANNEL_ROSTER_UPDATE; until then the
-        -- game holds none); read once more later in case no update comes
+        -- game holds none); read once more later in case no update comes, then
+        -- choose the earlier channel again
+        local askedAt = roster.asked
         C_Timer.After(5, function()
-            local ok, got = pcall(readRoster)
-            if ok and got then pcall(releaseHeld) end
+            if not roster.at or roster.at < askedAt then
+                local ok, got = pcall(readRoster)
+                if ok and got then pcall(releaseHeld) end
+            end
+            pcall(restoreSelection)
         end)
     end
 end
 lib.RequestRoster = requestRoster
+-- the names on the data channel's list (the window, the tests)
+function lib.RosterKeys()
+    local out = {}
+    for _, m in ipairs(roster.list or {}) do out[#out + 1] = m.key end
+    return out
+end
 
 local function onChannelMember(joined, name, channelName, guid)
     if type(channelName) ~= "string" or isSecret(channelName) or channelName:lower() ~= CHANNEL_NAME:lower() then return end
@@ -5965,67 +6172,78 @@ end
 -- "<kind>: <recipe name>" ("요리법: ...", "Recipe: ..."), which ties it to the
 -- recipe. Built again a while later (new records, names not loaded yet).
 local RECIPE_CLASS = (Enum and Enum.ItemClass and Enum.ItemClass.Recipe) or 9
-local scrollIndex, scrollIndexAt, scrollNamesMissing = nil, -1000, false
 
 local function normName(text)
     if type(text) ~= "string" or text == "" or isSecret(text) then return nil end
     return (text:lower():gsub("^%s+", ""):gsub("%s+$", ""))
 end
 
-local function buildScrollIndex()
-    local ids = {}
-    local function addID(id) if type(id) == "number" and id > 0 then ids[id] = true end end
-    for _, row in pairs(lib.Store("M")) do
-        if type(row) == "table" then
-            for _, id in ipairs(type(row.own) == "table" and row.own or {}) do addID(id) end
-            for id, ok in pairs(type(row.got) == "table" and row.got or {}) do if ok == true then addID(id) end end
+-- { index = recipe name -> { scroll itemID, ... }, missing = names not loaded yet }
+lib.DefineLookup("scrolls", {
+    on = { drops = true, vendors = true },
+    maxAge = function(value) return (type(value) == "table" and value.missing) and 10 or 60 end,
+    build = function()
+        local ids = {}
+        local function addID(id) if type(id) == "number" and id > 0 then ids[id] = true end end
+        -- the records (keys first: more may come in while the job waits for a frame)
+        local function rowsOf(t)
+            local rows = {}
+            for _, row in pairs(t) do rows[#rows + 1] = row end
+            return rows
         end
-    end
-    for _, items in pairs(lib.Seed("vendors") or {}) do
-        for _, id in ipairs(type(items) == "table" and items or {}) do addID(id) end
-    end
-    for _, items in pairs(lib.Data().drops) do
-        for id in pairs(type(items) == "table" and items or {}) do addID(id) end
-    end
-    for _, items in pairs(lib.Seed("drops") or {}) do
-        for _, id in ipairs(type(items) == "table" and items or {}) do addID(id) end
-    end
-    local index = {}
-    scrollNamesMissing = false
-    local getInstant = (C_Item and C_Item.GetItemInfoInstant) or _G.GetItemInfoInstant
-    local getName = C_Item and C_Item.GetItemNameByID
-    if type(getInstant) ~= "function" then return index end
-    for id in pairs(ids) do
-        local okInfo, _, _, _, _, _, classID = pcall(getInstant, id)
-        if okInfo and classID == RECIPE_CLASS then
-            local okName, name = false, nil
-            if getName then okName, name = pcall(getName, id) end
-            if okName and type(name) == "string" and not isSecret(name) then
-                local key = normName(name:match("^[^:]+:%s*(.+)$") or name:match("：%s*(.+)$"))
-                if key then
-                    index[key] = index[key] or {}
-                    table.insert(index[key], id)
-                end
-            else
-                scrollNamesMissing = true
-                if C_Item and C_Item.RequestLoadItemDataByID then pcall(C_Item.RequestLoadItemDataByID, id) end
+        for _, row in ipairs(rowsOf(lib.Store("M"))) do
+            if type(row) == "table" then
+                for _, id in ipairs(type(row.own) == "table" and row.own or {}) do addID(id) end
+                for id, ok in pairs(type(row.got) == "table" and row.got or {}) do if ok == true then addID(id) end end
+            end
+            lib.Pause()
+        end
+        for _, items in ipairs(rowsOf(lib.Data().drops)) do
+            for id in pairs(type(items) == "table" and items or {}) do addID(id) end
+            lib.Pause()
+        end
+        for _, kind in ipairs({ "vendors", "drops" }) do
+            for _, items in pairs(lib.Seed(kind) or {}) do
+                for _, id in ipairs(type(items) == "table" and items or {}) do addID(id) end
+                lib.Pause()
             end
         end
-    end
-    return index
-end
+        local list = {}
+        for id in pairs(ids) do list[#list + 1] = id end
+        lib.Pause(32)
+        local index, missing = {}, false
+        local getInstant = (C_Item and C_Item.GetItemInfoInstant) or _G.GetItemInfoInstant
+        local getName = C_Item and C_Item.GetItemNameByID
+        if type(getInstant) ~= "function" then return { index = index } end
+        for _, id in ipairs(list) do
+            local okInfo, _, _, _, _, _, classID = pcall(getInstant, id)
+            if okInfo and classID == RECIPE_CLASS then
+                local okName, name = false, nil
+                if getName then okName, name = pcall(getName, id) end
+                if okName and type(name) == "string" and not isSecret(name) then
+                    local key = normName(name:match("^[^:]+:%s*(.+)$") or name:match("：%s*(.+)$"))
+                    if key then
+                        index[key] = index[key] or {}
+                        table.insert(index[key], id)
+                    end
+                else
+                    missing = true
+                    if C_Item and C_Item.RequestLoadItemDataByID then pcall(C_Item.RequestLoadItemDataByID, id) end
+                end
+            end
+            lib.Pause()
+        end
+        return { index = index, missing = missing }
+    end,
+})
 
 -- { { label, text }, ... } for the scrolls of a recipe (by its name, any of
 -- the names given)
 function lib.RecipeSourceLines(...)
     local out = {}
     if not lib.ShowsTooltips() then return out end
-    local t = clock()
-    if not scrollIndex or t - scrollIndexAt > (scrollNamesMissing and 3 or 60) then
-        local ok, index = pcall(buildScrollIndex)
-        scrollIndex = ok and index or {}
-        scrollIndexAt = t
-    end
+    local built = lib.Lookup("scrolls")
+    local scrollIndex = built and built.index or {}
     local scrolls, seen = {}, {}
     for i = 1, select("#", ...) do
         for _, id in ipairs(scrollIndex[normName((select(i, ...)))] or {}) do
@@ -6075,20 +6293,30 @@ function lib.OnItemTooltip(tip, data)
 end
 
 -- shops seen in the game that sell the item
--- npcID -> its spots in EzWoW - Map Finder's data (when it is loaded)
-local npcSpotIndex
-local function npcSpots(npcID)
-    if not npcSpotIndex then
+-- npcID -> its entry in EzWoW - Map Finder's data (when it is loaded)
+lib.DefineLookup("npcSpots", {
+    input = function()
         local data = _G.EzWoWMapFinderData
-        if type(data) ~= "table" then return nil end
-        npcSpotIndex = {}
-        for _, e in ipairs(data) do
-            if type(e) == "table" and e.kind == "npc" and type(e.id) == "number" and not npcSpotIndex[e.id] then
-                npcSpotIndex[e.id] = e
+        return type(data) == "table" and data or nil
+    end,
+    build = function()
+        local index = {}
+        local data = _G.EzWoWMapFinderData
+        if type(data) ~= "table" then return index end
+        for i = 1, #data do
+            local e = data[i]
+            if type(e) == "table" and e.kind == "npc" and type(e.id) == "number" and not index[e.id] then
+                index[e.id] = e
             end
+            lib.Pause(0.25)
         end
-    end
-    local e = npcSpotIndex[npcID]
+        return index
+    end,
+})
+
+local function npcSpots(npcID)
+    local index = lib.Lookup("npcSpots")
+    local e = index and index[npcID]
     return e and type(e.spawns) == "table" and e.spawns or nil
 end
 
@@ -6201,7 +6429,14 @@ function lib.OnEvent(event, ...)
     elseif event == "UPDATE_MOUSEOVER_UNIT" then
         checkUnit("mouseover")
     elseif event == "CHANNEL_ROSTER_UPDATE" then
-        if readRoster() then releaseHeld() end
+        -- only the data channel's list (another channel's, e.g. after the choice was put back, is left alone)
+        local index = ...
+        local ours = displayRow()
+        if type(index) == "number" and not isSecret(index) and ours and index ~= ours then return end
+        if readRoster() then
+            releaseHeld()
+            if restoreTo and C_Timer and C_Timer.After then C_Timer.After(1, function() pcall(restoreSelection) end) end
+        end
     elseif event == "CHAT_MSG_CHANNEL_JOIN" or event == "CHAT_MSG_CHANNEL_LEAVE" then
         local _, name, _, _, _, _, _, _, channelBaseName, _, _, guid = ...
         onChannelMember(event == "CHAT_MSG_CHANNEL_JOIN", name, channelBaseName, guid)
@@ -6218,6 +6453,15 @@ function lib.OnEvent(event, ...)
         pcall(lib.AdoptWaitingQuestAlts)
         -- after the game's own channels have their numbers
         later(12, lib.JoinChannel)
+        -- the item lookups for tooltips (and the profession addon's windows),
+        -- built in the background before the first one asks for them
+        later(3, function()
+            local tips = lib.ShowsTooltips()
+            if not (tips or (lib.hosts and lib.hosts["EzWoW-ProfessionRecipes"])) then return end
+            lib.Lookup("drops")
+            lib.Lookup("vendors")
+            if tips then lib.Lookup("npcSpots") end
+        end)
         if C_Timer and C_Timer.NewTicker then
             C_Timer.NewTicker(SEND_EVERY, function()
                 if lib.SendTick then pcall(lib.SendTick) end
