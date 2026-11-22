@@ -21,7 +21,7 @@ WoW Forever (`Interface: 16001`) · `/ezfl` · `/미니게임`
 
 ### 화면 미리보기
 
-![비행 지도](docs/images/ui_ko.png)
+![비행 지도와 설정창](docs/images/ui_ko.png)
 
 > 실제 게임 화면입니다(WoW Forever, 한국어 클라이언트). 캐릭터 · 다른 플레이어 이름과 채팅 내용은 가렸습니다.
 
@@ -155,7 +155,7 @@ When you talk to a flight master (gryphon, wyvern, bat or hippogryph), Flight Ma
 
 ### Screenshots
 
-![Flight map](docs/images/ui_en.png)
+![Flight map and settings](docs/images/ui_en.png)
 
 > In-game screenshots with the addon set to English. The game client is Korean, so game text such as zone, item and spell names stays Korean. Character and player names and chat text are blurred.
 
