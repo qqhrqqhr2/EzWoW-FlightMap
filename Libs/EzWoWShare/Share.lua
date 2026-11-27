@@ -39,7 +39,7 @@ local ADDON_NAME, ns = ...
 local type, pairs, ipairs, tonumber, tostring, pcall, next = type, pairs, ipairs, tonumber, tostring, pcall, next
 local floor, format, concat, max, min = math.floor, string.format, table.concat, math.max, math.min
 
-local LIB_VERSION = 21
+local LIB_VERSION = 22
 
 -- one table for every copy (a newer copy updates the functions in it)
 local lib = _G.EzWoW_Share
@@ -1230,10 +1230,22 @@ local CHANNEL_NAME = "EzWoWQuestData"
 local MAX_MSG = 240                   -- addon messages are limited to 255 bytes
 local SEND_EVERY = 8                  -- seconds between outgoing messages
 local CONFIRM_GROUP, CONFIRM_PUBLIC = 1, 2
+-- What a game window shows every player alike (the goods of a shop, the spells of a
+-- trainer, who gives or takes a quest, its rewards, an object's name, a shop's side,
+-- the dungeon a creature was looted in) is kept from one player, by the data channel
+-- too; another value for one kept already still needs CONFIRM_PUBLIC players.
+-- Drops still wait for a second player on the channel.
+local ONE_PLAYER = { M = true, P = true, Z = true, W = true, U = true, J = true, E = true, S = true }
 -- a row waits this long after its last new vote; when the inbox is full the
 -- oldest rows make room (records come once now, so a vote is not refused)
 local INBOX_DAYS = 21
 local INBOX_MAX, INBOX_KIND = 8000, 5000
+
+-- most rows of one kind: drops are the facts that still wait in numbers (the kinds
+-- of ONE_PLAYER are kept at once), so they may use the whole inbox
+local function kindCap(k)
+    return k == "L" and INBOX_MAX or INBOX_KIND
+end
 local RECEIVE_PER_MINUTE = 600        -- records taken from one sender a minute (answers are paced below this)
 local RARE_SEND_AGE = 2 * 3600        -- own sightings younger than this are sent
 local RARE_KEEP_AGE = 6 * 3600        -- received sightings older than this are not kept
@@ -1418,7 +1430,7 @@ end
 -- quest facts keep the quest addon's inbox ("v2:" keys); other kinds use "v1:".
 -- A row lives only until its fact is stored (voteDone) or INBOX_DAYS after its
 -- last new vote; each kind ("L", "M", "W"... the key's first part) may hold at
--- most INBOX_KIND rows, so one busy kind cannot fill the inbox for the others.
+-- most kindCap(kind) rows, so one busy kind cannot fill the inbox for the others.
 -- Rows of facts this character has by now (stored, or shipped with the addons)
 -- are let go when the inbox is first used in a session.
 -- inboxCount[which] = rows; inboxCount.kinds[which][kind] = rows of that kind
@@ -1475,10 +1487,11 @@ local function voteValue(which, key, value, hash, spot, again)
     if entry and entry.s[hash] then return again and entry or nil end
     if not row then
         local k = key:sub(#tag + 1):match("^([^:]+):") or "?"
-        if inboxCount[which] >= INBOX_MAX or (inboxCount.kinds[which][k] or 0) >= INBOX_KIND then
-            makeRoom(which, (inboxCount.kinds[which][k] or 0) >= INBOX_KIND and k or nil)
+        local cap = kindCap(k)
+        if inboxCount[which] >= INBOX_MAX or (inboxCount.kinds[which][k] or 0) >= cap then
+            makeRoom(which, (inboxCount.kinds[which][k] or 0) >= cap and k or nil)
             box = inboxOf(which)
-            if inboxCount[which] >= INBOX_MAX or (inboxCount.kinds[which][k] or 0) >= INBOX_KIND then return nil end
+            if inboxCount[which] >= INBOX_MAX or (inboxCount.kinds[which][k] or 0) >= cap then return nil end
         end
         local kinds = inboxCount.kinds[which]
         row = {}
@@ -1564,12 +1577,7 @@ local function receiveQuestNpc(code, storeName, body, hash, needed)
         if only then voteDone("quest", voteKey) end
         return
     end
-    if entry.n < needed then
-        -- waits for more players (besides this character's own record it can
-        -- become an alternate one)
-        activity.pend = activity.pend + 1
-        return
-    end
+    -- (one player is enough for who gives or takes a quest: ONE_PLAYER)
     -- this character's own record stays; the other one is kept besides it
     if type(current) == "table" and not current.shared then
         keepQuestAlt(storeName, q, value, entry.p, entry.n)
@@ -1865,8 +1873,8 @@ end
 -----------------------------------------------------------------------------
 -- What NPCs sell, seen in their shop windows (record kind "M":
 -- "npcID,itemID.itemID...", base 36). This character's own list is the shop
--- as seen on the last visit; an item from other players counts once enough
--- different players saw it (see lib.Vote).
+-- as seen on the last visit; an item from other players is kept from one
+-- player (ONE_PLAYER).
 -- store M: [npcID] = { own = { itemID, ... }, got = { [itemID] = true } }
 -----------------------------------------------------------------------------
 local VENDOR_KIND = "M"
@@ -2026,7 +2034,7 @@ lib.RegisterKind(VENDOR_KIND, {
         local row = type(t[npcID]) == "table" and t[npcID] or nil
         local own = {}
         for _, id in ipairs(row and type(row.own) == "table" and row.own or {}) do own[id] = true end
-        local any, waiting = false, false
+        local any = false
         for code in list:gmatch("[^%.]+") do
             local itemID = tonumber(code, 36)
             -- what this character saw, confirmed already or shipped: no vote
@@ -2034,8 +2042,8 @@ lib.RegisterKind(VENDOR_KIND, {
                 and not (row and type(row.got) == "table" and row.got[itemID])
                 and not lib.SeedHas("vendors", npcID, itemID) then
                 local key = "M:" .. npcID .. ":" .. itemID
-                local n = lib.Vote(key, "1", hash, needed)
-                if n and n >= (tonumber(needed) or 2) then
+                -- one player is enough for what a shop sells (ONE_PLAYER)
+                if lib.Vote(key, "1", hash, needed) then
                     if not row then
                         row = {}
                         t[npcID] = row
@@ -2044,13 +2052,11 @@ lib.RegisterKind(VENDOR_KIND, {
                     row.got[itemID] = true
                     lib.VoteDone(key)
                     any = true
-                elseif n then
-                    waiting = true
                 end
             end
         end
         if any then changed("vendors") end
-        return any or (waiting and "wait") or false
+        return any
     end,
 })
 
@@ -2060,8 +2066,8 @@ lib.RegisterKind(VENDOR_KIND, {
 -- H Horde, N neither). The side keeps the other faction's shops out of the
 -- "sold by" lists. The spot goes to EzWoW - Map Finder's NPC spots (kind "N")
 -- of the players who have it, so shops seen by players without it get a
--- place on the map too. A side from other players counts once enough
--- different players sent it (see lib.Vote).
+-- place on the map too. A side from other players is kept from one player
+-- (ONE_PLAYER).
 -- store P: [npcID] = { side = own note, spot = { continent, x, y }, got = confirmed side }
 -----------------------------------------------------------------------------
 do
@@ -2162,15 +2168,13 @@ do
             local shipped = lib.Seed("sides")
             if not (row and (row.side or row.got)) and not (shipped and shipped[npcID] == side) then
                 local key = "P:" .. npcID
-                local n = lib.Vote(key, side, hash, needed)
-                if n and n >= (tonumber(needed) or 2) then
+                -- one player is enough for a shop's side (ONE_PLAYER)
+                if lib.Vote(key, side, hash, needed) then
                     row = row or {}
                     row.got = side
                     t[npcID] = row
                     lib.VoteDone(key)
                     result = true
-                elseif n then
-                    result = "wait"
                 end
             end
             -- the spot: Map Finder checks it against its data and counts it
@@ -2238,7 +2242,9 @@ lib.RegisterKind(INSTANCE_KIND, {
         if shipped and shipped[npcID] == mapID then return false end     -- shipped already: no vote
         local n = lib.Vote("Z:" .. npcID, tostring(mapID), hash, needed)
         if not n then return false end
-        if n < (tonumber(needed) or 2) then return "wait" end
+        -- the first dungeon is kept from one player (ONE_PLAYER); another one needs more
+        local need = (row.own == nil and row.got == nil) and CONFIRM_GROUP or (tonumber(needed) or CONFIRM_PUBLIC)
+        if n < need then return "wait" end
         row.got = mapID
         t[npcID] = row
         lib.VoteDone("Z:" .. npcID)
@@ -2255,7 +2261,8 @@ lib.RegisterKind(INSTANCE_KIND, {
 --   U  what a trainer teaches  "npcID,spell.spell..."      spell IDs in base 36
 --   J  object names            "objectID,name"            players with the same client
 --                              language only
--- A fact from other players is kept once enough different players sent it (lib.Vote).
+-- A fact from other players is kept from one player (ONE_PLAYER); another name for an
+-- object that has one needs more players.
 -- store W: [questID]  = { own = { r = { itemID... }, c = { itemID... } }, got = { [itemID] = "r" | "c" } }
 -- store U: [npcID]    = { own = { spellID... }, got = { [spellID] = true } }
 -- store J: [objectID] = { own = name, got = name }
@@ -2317,23 +2324,21 @@ local function setupMoreKinds()
         return set
     end
 
-    -- votes for IDs of one record (IDs had already get no vote); returns stored, waiting
+    -- IDs of one record (IDs had already get no vote): one player is enough
+    -- (ONE_PLAYER); returns stored, waiting
     local function voteIds(key, ids, value, hash, needed, have, store)
-        local any, waiting = false, false
+        local any = false
         for _, id in ipairs(ids) do
             if not have(id) then
                 local voteKey = key .. ":" .. id
-                local n = lib.Vote(voteKey, value, hash, needed)
-                if n and n >= (tonumber(needed) or 2) then
+                if lib.Vote(voteKey, value, hash, needed) then
                     store(id)
                     lib.VoteDone(voteKey)
                     any = true
-                elseif n then
-                    waiting = true
                 end
             end
         end
-        return any, waiting
+        return any, false
     end
 
     ---------------------------------------------------------------- W: quest rewards
@@ -2519,15 +2524,35 @@ local function setupMoreKinds()
         changed("trainers")
     end
 
-    -- spells a trainer teaches (this character's and confirmed ones)
+    -- spells a trainer teaches (this character's, received and shipped ones)
     function lib.GetTrainerSpells(npcID)
-        local row = lib.Store(TRAINER_KIND)[tonumber(npcID) or 0]
-        if type(row) ~= "table" then return nil end
-        local set = setOf(row.own)
-        for id, ok in pairs(type(row.got) == "table" and row.got or {}) do
+        npcID = tonumber(npcID) or 0
+        local row = lib.Store(TRAINER_KIND)[npcID]
+        local seed = lib.Seed("trainers")
+        local shipped = seed and seed[npcID]
+        if type(row) ~= "table" and type(shipped) ~= "table" then return nil end
+        local set = setOf(type(row) == "table" and row.own)
+        for id, ok in pairs(type(row) == "table" and type(row.got) == "table" and row.got or {}) do
             if ok == true then set[id] = true end
         end
+        for _, id in ipairs(type(shipped) == "table" and shipped or {}) do
+            if type(id) == "number" then set[id] = true end
+        end
         return sortedKeys(set)
+    end
+
+    -- trainers known from this character's, received and shipped records: { npcID, ... }
+    function lib.TrainerIDs()
+        local out, seen = {}, {}
+        for _, t in ipairs({ lib.Store(TRAINER_KIND), lib.Seed("trainers") or {} }) do
+            for npcID in pairs(t) do
+                if type(npcID) == "number" and not seen[npcID] then
+                    seen[npcID] = true
+                    out[#out + 1] = npcID
+                end
+            end
+        end
+        return out
     end
 
     lib.RegisterKind(TRAINER_KIND, {
@@ -2550,6 +2575,7 @@ local function setupMoreKinds()
                 function(id)
                     local row = t[npcID]
                     return mine[id] or (type(row) == "table" and type(row.got) == "table" and row.got[id] == true)
+                        or lib.SeedHas("trainers", npcID, id)
                 end,
                 function(id)
                     local row = type(t[npcID]) == "table" and t[npcID] or {}
@@ -2614,7 +2640,9 @@ local function setupMoreKinds()
             if row.got == name or row.own == name then return false end   -- had it already: no vote
             local n = lib.Vote("J:" .. id, name, hash, needed)
             if not n then return false end
-            if n < (tonumber(needed) or 2) then return "wait" end
+            -- the first name is kept from one player (ONE_PLAYER); another one needs more
+            local need = (row.own == nil and row.got == nil) and CONFIRM_GROUP or (tonumber(needed) or CONFIRM_PUBLIC)
+            if n < need then return "wait" end
             row.got = name
             t[id] = row
             lib.VoteDone("J:" .. id)
@@ -2677,7 +2705,8 @@ do
     function checks.U(npc, spell)
         local r = row("U", npc)
         spell = tonumber(spell)
-        return r ~= nil and (inList(r.own, spell) or (type(r.got) == "table" and r.got[spell] == true))
+        if r ~= nil and (inList(r.own, spell) or (type(r.got) == "table" and r.got[spell] == true)) then return true end
+        return lib.SeedHas("trainers", tonumber(npc), spell)
     end
     function checks.J(id)
         local r = row("J", id)
@@ -2720,6 +2749,75 @@ do
             ok, known = pcall(fn, a, b)
         end
         return ok and known == true
+    end
+end
+
+-----------------------------------------------------------------------------
+-- Facts one player is enough for now (ONE_PLAYER) that waited in the inbox
+-- under the earlier rule: taken when the session starts, through the same
+-- receive path (the vote is the sender's own again, so nothing counts twice).
+-- A row whose values tie (players disagree) keeps waiting. Rows of facts had
+-- already are let go when the inbox is first used (lib.InboxKnown).
+-- pause: lib.Pause when it runs as a background job. -> rows taken
+-----------------------------------------------------------------------------
+do
+    -- the message body the row came from
+    local function waitingBody(code, rest, value, spot)
+        if code == "M" or code == "U" then
+            local a, b = rest:match("^%u:(%d+):(%d+)$")
+            return a and (a .. "," .. b36(tonumber(b))) or nil
+        elseif code == "W" then
+            local q, item = rest:match("^W:(%d+):(%d+)$")
+            if not q or (value ~= "r" and value ~= "c") then return nil end
+            local id = b36(tonumber(item))
+            return value == "r" and (q .. "," .. id .. ",") or (q .. ",," .. id)
+        elseif code == "Z" or code == "P" or code == "J" then
+            local id = rest:match("^%u:(%d+)$")
+            return id and (id .. "," .. tostring(value)) or nil
+        elseif code == "E" or code == "S" then
+            local q = rest:match("^%u:(%d+)$")
+            local k, id = tostring(value):match("^(%a)%a*:(%d+)$")
+            if not (q and (k == "n" or k == "o")) then return nil end
+            local text = spotText(spot)
+            return q .. "," .. k .. "," .. id .. (text and ("," .. text) or "")
+        end
+        return nil
+    end
+
+    function lib.AdoptWaitingFacts(pause)
+        local todo = {}
+        for _, which in ipairs({ "other", "quest" }) do
+            local box, tag = inboxOf(which)
+            for key, row in pairs(box) do
+                local rest = type(key) == "string" and key:sub(#tag + 1) or ""
+                local code = rest:match("^(%u):")
+                if code and ONE_PLAYER[code] and type(row) == "table" and type(row.v) == "table" then
+                    -- the value most players sent (a tie keeps waiting)
+                    local best, bestN, tie = nil, 0, false
+                    for value, entry in pairs(row.v) do
+                        local n = type(entry) == "table" and tonumber(entry.n) or 0
+                        if n > bestN then
+                            best, bestN, tie = value, n, false
+                        elseif n == bestN then
+                            tie = true
+                        end
+                    end
+                    local entry = best and row.v[best]
+                    local hash = not tie and type(entry) == "table" and type(entry.s) == "table" and next(entry.s)
+                    if hash then todo[#todo + 1] = { code, rest, best, hash, entry.p } end
+                end
+            end
+        end
+        local taken = 0
+        for _, t in ipairs(todo) do
+            local body = waitingBody(t[1], t[2], t[3], t[5])
+            if body then
+                receive(t[1], body, t[4], CONFIRM_GROUP)
+                taken = taken + 1
+            end
+            if pause then pause() end
+        end
+        return taken
     end
 end
 
@@ -6451,6 +6549,12 @@ function lib.OnEvent(event, ...)
         lib.started = true
         pcall(lib.SyncRetakeSkipped)
         pcall(lib.AdoptWaitingQuestAlts)
+        -- facts one player is enough for now (ONE_PLAYER) that waited under the earlier rule
+        if lib.Background then
+            lib.Background("adoptWaiting", function() lib.AdoptWaitingFacts(lib.Pause) end)
+        else
+            pcall(lib.AdoptWaitingFacts)
+        end
         -- after the game's own channels have their numbers
         later(12, lib.JoinChannel)
         -- the item lookups for tooltips (and the profession addon's windows),
